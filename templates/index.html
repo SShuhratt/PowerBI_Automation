@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoBI — Self-Healing Spreadsheet to Power BI Engine</title>
+    <meta name="description" content="Automate messy spreadsheet cleaning, summary row pruning, and instant Power BI semantic model & DAX measure generation.">
+    <!-- Google Fonts & Chart.js -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="brand-group">
+                <div class="brand-logo">BI</div>
+                <div class="brand-meta">
+                    <h1>AutoBI Studio</h1>
+                    <p>Self-Healing Spreadsheet to Power BI Engine</p>
+                </div>
+            </div>
+            <div class="header-badges">
+                <span class="badge badge-emerald">
+                    <span class="badge-pulse"></span> Engine Active
+                </span>
+            </div>
+        </header>
+
+        <!-- Hero Section -->
+        <section class="hero-section">
+            <h2 class="hero-title">From Messy Spreadsheets to Power BI in Seconds</h2>
+            <p class="hero-subtitle">
+                Drop raw Excel or CSV files with human summary rows, schema drift, or blank columns. 
+                AutoBI self-heals data integrity and generates production-ready DAX measures.
+            </p>
+        </section>
+
+        <!-- Upload Card -->
+        <div id="uploadCard" class="upload-card">
+            <div id="dropzone" class="dropzone">
+                <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" style="display: none;">
+                <div class="dropzone-icon">📁</div>
+                <div class="dropzone-prompt">
+                    <h3>Drag & Drop your Excel or CSV file here</h3>
+                    <p>Supports .xlsx, .xls, or .csv up to 32MB</p>
+                </div>
+                <div class="dropzone-actions">
+                    <button type="button" id="browseBtn" class="btn btn-primary">Browse Files</button>
+                    <button type="button" id="sampleBtn" class="btn btn-secondary">⚡ Try Demo Sample (Broken Total & Blank Revenue)</button>
+                </div>
+            </div>
+
+            <div class="trust-footer">
+                <div class="trust-item">
+                    <span>🔒</span>
+                    <span>Zero Data Retention: Processed in memory and purged immediately</span>
+                </div>
+                <div class="trust-item">
+                    <span>⚡</span>
+                    <span>Instant DAX & Power Query M generation</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State Card -->
+        <div id="loadingCard" class="loading-card">
+            <div class="spinner"></div>
+            <h3 style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: #fff;">
+                Analyzing & Healing Dataset...
+            </h3>
+            <p id="loadingFileName" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">
+                Processing spreadsheet
+            </p>
+            <div class="loading-steps">
+                <span class="step-item active">1. Purging Trailer Rows</span>
+                <span>→</span>
+                <span class="step-item active">2. Inferring Missing Formulas</span>
+                <span>→</span>
+                <span class="step-item active">3. Modeling DAX Measures</span>
+            </div>
+        </div>
+
+        <!-- Results Workspace -->
+        <main id="resultsContainer" class="results-container">
+            <!-- Action Banner -->
+            <div class="action-banner">
+                <div class="banner-left">
+                    <h2>Dataset Cleansed & Ready for Power BI</h2>
+                    <p>Source file: <strong id="activeFileBadge" style="color: #a5b4fc;">sample.xlsx</strong> • Model verified</p>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button id="resetUploadBtn" class="btn btn-secondary">Upload Another</button>
+                    <button id="downloadZipBtn" class="btn btn-emerald">📥 Download Power BI Starter Kit (.zip)</button>
+                </div>
+            </div>
+
+            <!-- Tab Navigation -->
+            <nav class="tab-navigation" aria-label="Analysis Tabs">
+                <button class="tab-btn active" data-tab="tabDashboard">
+                    <span>📊</span> Executive Dashboard
+                </button>
+                <button class="tab-btn" data-tab="tabAudit">
+                    <span>🛡️</span> Self-Healing Audit Trail
+                </button>
+                <button class="tab-btn" data-tab="tabDax">
+                    <span>📐</span> Power BI & DAX Studio
+                </button>
+                <button class="tab-btn" data-tab="tabData">
+                    <span>📋</span> Clean Data Explorer
+                </button>
+            </nav>
+
+            <!-- Tab 1: Executive Dashboard -->
+            <section id="tabDashboard" class="tab-panel active">
+                <!-- KPI Grid -->
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-label">Total Gross Revenue</div>
+                        <div id="kpiRev" class="kpi-value">$0.00</div>
+                        <div class="kpi-subtext">Auto-computed from unit * price</div>
+                    </div>
+                    <div class="kpi-card cyan">
+                        <div class="kpi-label">Volume Sold</div>
+                        <div id="kpiUnits" class="kpi-value">0</div>
+                        <div class="kpi-subtext">Total catalog item units</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Unique Orders</div>
+                        <div id="kpiOrders" class="kpi-value">0</div>
+                        <div class="kpi-subtext">Distinct recorded transactions</div>
+                    </div>
+                    <div class="kpi-card amber">
+                        <div class="kpi-label">Average Order Value (AOV)</div>
+                        <div id="kpiAov" class="kpi-value">$0.00</div>
+                        <div class="kpi-subtext">DAX: DIVIDE([Revenue], [Orders])</div>
+                    </div>
+                    <div class="kpi-card emerald">
+                        <div class="kpi-label">Completed Revenue</div>
+                        <div id="kpiCompletedRev" class="kpi-value">$0.00</div>
+                        <div class="kpi-subtext">Fulfillable realized cashflow</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Cancellation Rate</div>
+                        <div id="kpiCancelRate" class="kpi-value">0.0%</div>
+                        <div id="kpiCancelSub" class="kpi-subtext">Operational risk metric</div>
+                    </div>
+                </div>
+
+                <!-- Charts Grid -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <h3>Gross Revenue by Product Category</h3>
+                        <div style="position: relative; height: 260px;">
+                            <canvas id="categoryChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Revenue Distribution by Region</h3>
+                        <div style="position: relative; height: 260px;">
+                            <canvas id="regionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 2: Self-Healing Audit Trail -->
+            <section id="tabAudit" class="tab-panel">
+                <div id="auditList" class="audit-container">
+                    <!-- Injected dynamically by app.js -->
+                </div>
+            </section>
+
+            <!-- Tab 3: Power BI & DAX Studio -->
+            <section id="tabDax" class="tab-panel">
+                <div style="margin-bottom: 24px;">
+                    <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                        Production-Grade DAX Measures
+                    </h3>
+                    <p style="font-size: 13px; color: var(--text-muted);">
+                        Copy individual formulas directly into Power BI Desktop's "New Measure" bar.
+                    </p>
+                </div>
+                <div id="daxList">
+                    <!-- DAX measure cards injected dynamically -->
+                </div>
+
+                <div style="margin-top: 36px; margin-bottom: 16px;">
+                    <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                        Power Query (M) Script
+                    </h3>
+                    <p style="font-size: 13px; color: var(--text-muted);">
+                        Paste into Power BI Advanced Editor to load with automated column typing.
+                    </p>
+                </div>
+                <div class="code-card">
+                    <div class="code-card-header">
+                        <span class="code-card-title">LoadData.m</span>
+                        <button id="copyMBtn" class="copy-btn">Copy M Script</button>
+                    </div>
+                    <pre id="powerQueryMCode" class="code-block"></pre>
+                </div>
+            </section>
+
+            <!-- Tab 4: Clean Data Explorer -->
+            <section id="tabData" class="tab-panel">
+                <div class="table-card">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead id="tableThead"></thead>
+                            <tbody id="tableTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

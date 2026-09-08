@@ -1,0 +1,44 @@
+{
+  "source_file": "D:\\Documents\\power_bi_test_sample.xlsx",
+  "timestamp": "2026-09-08T08:15:14.786825",
+  "raw_row_count": 13,
+  "cleaned_row_count": 12,
+  "dropped_rows": [
+    {
+      "row_index": 12,
+      "reason": "Identified as summary row (Total/Subtotal)",
+      "content_preview": {
+        "Order ID": "Total"
+      }
+    }
+  ],
+  "inferred_calculations": [
+    {
+      "column": "total_revenue",
+      "formula": "units_sold * unit_price",
+      "status": "Filled 12 rows where column was completely blank."
+    }
+  ],
+  "renamed_columns": {
+    "Order ID": "order_id",
+    "Order Date": "order_date",
+    "Region": "region",
+    "Sales Rep": "sales_rep",
+    "Category": "category",
+    "Units Sold": "units_sold",
+    "Unit Price ($)": "unit_price",
+    "Total Revenue ($)": "total_revenue",
+    "Status": "status"
+  },
+  "datatype_conversions": {
+    "order_id": "numeric",
+    "order_date": "datetime64",
+    "region": "string",
+    "sales_rep": "string",
+    "category": "string",
+    "units_sold": "numeric",
+    "unit_price": "float64",
+    "total_revenue": "float64",
+    "status": "string"
+  }
+}

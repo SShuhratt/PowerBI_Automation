@@ -1,0 +1,40 @@
+// Measure: Total Revenue ($#,##0.00)
+// Total gross revenue generated across all recorded transactions.
+Total Revenue = SUM('Sales'[total_revenue])
+
+// Measure: Total Units Sold (#,##0)
+// Total volume of individual items or units sold.
+Total Units Sold = SUM('Sales'[units_sold])
+
+// Measure: Total Orders (#,##0)
+// Count of unique transactions / orders.
+Total Orders = DISTINCTCOUNT('Sales'[order_id])
+
+// Measure: Average Order Value ($#,##0.00)
+// Average revenue realized per unique order.
+Average Order Value = DIVIDE([Total Revenue], [Total Orders], 0)
+
+// Measure: Average Unit Price ($#,##0.00)
+// Average nominal unit price across catalog sales.
+Average Unit Price = AVERAGE('Sales'[unit_price])
+
+// Measure: Completed Revenue ($#,##0.00)
+// Total revenue for orders in 'Completed' state.
+Completed Revenue = CALCULATE([Total Revenue], 'Sales'[status] = "Completed")
+
+// Measure: Pending Revenue ($#,##0.00)
+// Total revenue for orders in 'Pending' state.
+Pending Revenue = CALCULATE([Total Revenue], 'Sales'[status] = "Pending")
+
+// Measure: Cancelled Revenue ($#,##0.00)
+// Total revenue for orders in 'Cancelled' state.
+Cancelled Revenue = CALCULATE([Total Revenue], 'Sales'[status] = "Cancelled")
+
+// Measure: Cancellation Rate (0.0%)
+// Percentage of all orders that ended in cancellation.
+Cancellation Rate = DIVIDE(CALCULATE(COUNTROWS('Sales'), 'Sales'[status] = "Cancelled"), COUNTROWS('Sales'), 0)
+
+// Measure: Completion Rate (0.0%)
+// Percentage of successfully completed orders.
+Completion Rate = DIVIDE(CALCULATE(COUNTROWS('Sales'), 'Sales'[status] = "Completed"), COUNTROWS('Sales'), 0)
+
