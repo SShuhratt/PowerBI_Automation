@@ -1,6 +1,6 @@
 /**
- * app.js - AutoBI Web Portal Frontend Logic
- * Manages drag-and-drop file ingestion, asynchronous processing,
+ * app.js - AutoBI Multi-Domain Web Portal Frontend Logic
+ * Manages drag-and-drop file ingestion, domain recognition & switching,
  * interactive Chart.js visualization, DAX copying, and zip export.
  */
 
@@ -15,14 +15,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultsContainer = document.getElementById('resultsContainer');
     const downloadZipBtn = document.getElementById('downloadZipBtn');
     const activeFileBadge = document.getElementById('activeFileBadge');
+    const domainBadge = document.getElementById('domainBadge');
+    const domainSelect = document.getElementById('domainSelect');
 
     // Chart Instances
-    let catChartInstance = null;
-    let regChartInstance = null;
-    let statusChartInstance = null;
+    let chart1Instance = null;
+    let chart2Instance = null;
 
-    // Current Session
+    // Current State
     let currentSessionId = null;
+    let currentLastFile = null;
+    let currentLastDomain = 'sales';
 
     // --- Drag and Drop Events ---
     if (dropzone) {
@@ -46,12 +49,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const dt = e.dataTransfer;
             const files = dt.files;
             if (files.length > 0) {
+                currentLastFile = files[0];
                 handleFileUpload(files[0]);
             }
         });
 
         dropzone.addEventListener('click', (e) => {
-            if (e.target !== browseBtn && e.target !== sampleBtn && !sampleBtn.contains(e.target)) {
+            if (e.target !== browseBtn && e.target !== sampleBtn && !sampleBtn.contains(e.target) && !e.target.classList.contains('demo-pill-btn')) {
                 fileInput.click();
             }
         });
@@ -67,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileInput) {
         fileInput.addEventListener('change', () => {
             if (fileInput.files.length > 0) {
+                currentLastFile = fileInput.files[0];
                 handleFileUpload(fileInput.files[0]);
             }
         });
@@ -75,7 +80,28 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sampleBtn) {
         sampleBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleSampleRun();
+            handleSampleRun('sales');
+        });
+    }
+
+    // Demo Pills
+    document.querySelectorAll('.demo-pill-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const domain = btn.getAttribute('data-domain');
+            handleSampleRun(domain);
+        });
+    });
+
+    // Domain Switcher in Results Banner
+    if (domainSelect) {
+        domainSelect.addEventListener('change', () => {
+            const selectedDomain = domainSelect.value;
+            if (currentLastFile) {
+                handleFileUpload(currentLastFile, selectedDomain);
+            } else {
+                handleSampleRun(selectedDomain);
+            }
         });
     }
 
@@ -91,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingCard.style.display = 'none';
     }
 
-    async function handleFileUpload(file) {
+    async function handleFileUpload(file, domainOverride = null) {
         const ext = file.name.split('.').pop().toLowerCase();
         if (!['xlsx', 'xls', 'csv'].includes(ext)) {
             alert(`Unsupported file type: .${ext}. Please upload an Excel (.xlsx, .xls) or CSV file.`);
@@ -101,6 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
         showLoading(file.name);
         const formData = new FormData();
         formData.append('file', file);
+        if (domainOverride) {
+            formData.append('domain', domainOverride);
+        }
 
         try {
             const res = await fetch('/api/upload', {
@@ -122,10 +151,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function handleSampleRun() {
-        showLoading('power_bi_test_sample.xlsx (Demo File)');
+    async function handleSampleRun(domain = 'sales') {
+        currentLastDomain = domain;
+        currentLastFile = null;
+        showLoading(`Preset: ${domain.toUpperCase()} Demo Dataset`);
+
         try {
-            const res = await fetch('/api/sample', { method: 'POST' });
+            const res = await fetch('/api/sample', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain: domain })
+            });
             const data = await res.json();
             if (data.success) {
                 renderResults(data);
@@ -146,6 +182,15 @@ document.addEventListener('DOMContentLoaded', () => {
         currentSessionId = data.session_id;
         activeFileBadge.textContent = data.filename;
 
+        // 1. Domain Badge & Switcher
+        const dom = data.domain;
+        if (domainBadge && dom) {
+            domainBadge.textContent = `${dom.icon} ${dom.label} (${dom.confidence}% match)`;
+            if (domainSelect) {
+                domainSelect.value = dom.key;
+            }
+        }
+
         // Set download link
         if (downloadZipBtn) {
             downloadZipBtn.onclick = () => {
@@ -153,26 +198,19 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         }
 
-        // 1. KPI Cards
-        const kpis = data.kpis;
-        document.getElementById('kpiRev').textContent = formatCurrency(kpis.total_revenue);
-        document.getElementById('kpiUnits').textContent = kpis.total_units.toLocaleString();
-        document.getElementById('kpiOrders').textContent = kpis.total_orders.toLocaleString();
-        document.getElementById('kpiAov').textContent = formatCurrency(kpis.aov);
-        document.getElementById('kpiCompletedRev').textContent = formatCurrency(kpis.completed_rev);
-        document.getElementById('kpiCancelRate').textContent = kpis.cancellation_rate + '%';
-        document.getElementById('kpiCancelSub').textContent = `Lost Rev: ${formatCurrency(kpis.cancelled_rev)}`;
+        // 2. Dynamic KPI Cards
+        renderKpis(data.kpis);
 
-        // 2. Charts
+        // 3. Dynamic Charts
         renderCharts(data.charts);
 
-        // 3. Audit Trail
+        // 4. Audit Trail
         renderAuditTrail(data.audit_log);
 
-        // 4. DAX Measures & M Script
-        renderCodeBlocks(data.dax_measures, data.power_query_m);
+        // 5. DAX Measures & M Script
+        renderCodeBlocks(data.dax_measures, data.power_query_m, data.domain);
 
-        // 5. Clean Table
+        // 6. Clean Table
         renderTable(data.table_columns, data.table_records);
 
         // Reveal Workspace
@@ -184,49 +222,56 @@ document.addEventListener('DOMContentLoaded', () => {
             resultsContainer.style.display = 'none';
             uploadCard.style.display = 'block';
             fileInput.value = '';
+            currentLastFile = null;
         };
     }
 
-    // --- Formatters ---
-    function formatCurrency(val) {
-        return '$' + Number(val || 0).toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
+    // --- Dynamic KPI Rendering ---
+    function renderKpis(kpis) {
+        const kpiGrid = document.getElementById('kpiGrid');
+        kpiGrid.innerHTML = '';
+
+        kpis.forEach(k => {
+            const card = document.createElement('div');
+            card.className = `kpi-card ${k.theme || ''}`;
+            card.innerHTML = `
+                <div class="kpi-label">${escapeHtml(k.label)}</div>
+                <div class="kpi-value">${escapeHtml(k.value)}</div>
+                <div class="kpi-subtext">${escapeHtml(k.sub || '')}</div>
+            `;
+            kpiGrid.appendChild(card);
         });
     }
 
-    // --- Chart Rendering ---
+    // --- Dynamic Chart Rendering ---
     function renderCharts(charts) {
-        // Destroy old charts if exist
-        if (catChartInstance) catChartInstance.destroy();
-        if (regChartInstance) regChartInstance.destroy();
+        if (chart1Instance) chart1Instance.destroy();
+        if (chart2Instance) chart2Instance.destroy();
 
-        // 1. Category Bar Chart
-        const catCanvas = document.getElementById('categoryChart');
-        if (catCanvas && charts.category) {
-            const ctx = catCanvas.getContext('2d');
-            const labels = Object.keys(charts.category);
-            const values = Object.values(charts.category);
+        const colors = [
+            '#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'
+        ];
 
-            catChartInstance = new Chart(ctx, {
-                type: 'bar',
+        // Chart 1
+        const c1Config = charts.chart1;
+        const c1Title = document.getElementById('chart1Title');
+        const c1Canvas = document.getElementById('chart1Canvas');
+
+        if (c1Config && c1Canvas) {
+            c1Title.textContent = c1Config.title;
+            const ctx1 = c1Canvas.getContext('2d');
+            const labels = Object.keys(c1Config.data);
+            const values = Object.values(c1Config.data);
+
+            chart1Instance = new Chart(ctx1, {
+                type: c1Config.type || 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Gross Revenue ($)',
+                        label: 'Value',
                         data: values,
-                        backgroundColor: [
-                            'rgba(99, 102, 241, 0.85)',
-                            'rgba(6, 182, 212, 0.85)',
-                            'rgba(16, 185, 129, 0.85)',
-                            'rgba(245, 158, 11, 0.85)',
-                        ],
-                        borderColor: [
-                            '#6366f1',
-                            '#06b6d4',
-                            '#10b981',
-                            '#f59e0b',
-                        ],
+                        backgroundColor: c1Config.type === 'doughnut' ? colors : 'rgba(99, 102, 241, 0.85)',
+                        borderColor: c1Config.type === 'doughnut' ? '#090d16' : '#6366f1',
                         borderWidth: 1,
                         borderRadius: 6
                     }]
@@ -235,70 +280,45 @@ document.addEventListener('DOMContentLoaded', () => {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: (item) => 'Revenue: ' + formatCurrency(item.raw)
-                            }
-                        }
+                        legend: { display: c1Config.type === 'doughnut', labels: { color: '#cbd5e1' } }
                     },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                            ticks: {
-                                color: '#94a3b8',
-                                callback: (v) => '$' + Number(v).toLocaleString()
-                            }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#cbd5e1', font: { weight: '500' } }
-                        }
+                    scales: c1Config.type === 'doughnut' ? {} : {
+                        y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                        x: { grid: { display: false }, ticks: { color: '#cbd5e1' } }
                     }
                 }
             });
         }
 
-        // 2. Region Doughnut Chart
-        const regCanvas = document.getElementById('regionChart');
-        if (regCanvas && charts.region) {
-            const ctx = regCanvas.getContext('2d');
-            const labels = Object.keys(charts.region);
-            const values = Object.values(charts.region);
+        // Chart 2
+        const c2Config = charts.chart2;
+        const c2Title = document.getElementById('chart2Title');
+        const c2Canvas = document.getElementById('chart2Canvas');
 
-            regChartInstance = new Chart(ctx, {
-                type: 'doughnut',
+        if (c2Config && c2Canvas) {
+            c2Title.textContent = c2Config.title;
+            const ctx2 = c2Canvas.getContext('2d');
+            const labels = Object.keys(c2Config.data);
+            const values = Object.values(c2Config.data);
+
+            chart2Instance = new Chart(ctx2, {
+                type: c2Config.type || 'doughnut',
                 data: {
                     labels: labels,
                     datasets: [{
                         data: values,
-                        backgroundColor: [
-                            '#6366f1',
-                            '#06b6d4',
-                            '#10b981',
-                            '#f59e0b',
-                            '#ec4899'
-                        ],
-                        borderWidth: 2,
-                        borderColor: '#090d16'
+                        backgroundColor: colors,
+                        borderColor: '#090d16',
+                        borderWidth: 2
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { color: '#cbd5e1', padding: 14 }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: (item) => `${item.label}: ${formatCurrency(item.raw)}`
-                            }
-                        }
+                        legend: { position: 'bottom', labels: { color: '#cbd5e1', padding: 12 } }
                     },
-                    cutout: '68%'
+                    cutout: c2Config.type === 'doughnut' ? '65%' : 0
                 }
             });
         }
@@ -343,7 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="audit-icon emerald">✓</div>
                     <div>
                         <h3>Auto-Computed ${audit.inferred_calculations.length} Missing Business Metric(s)</h3>
-                        <p class="text-xs text-slate-400">Detected completely blank critical columns and reconstructed them.</p>
+                        <p class="text-xs text-slate-400">Reconstructed missing calculations from existing attributes.</p>
                     </div>
                 </div>
             `;
@@ -383,18 +403,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- DAX & Power Query Code Blocks ---
-    function renderCodeBlocks(daxMeasures, mScript) {
+    function renderCodeBlocks(daxMeasures, mScript, domain) {
         const daxList = document.getElementById('daxList');
-        daxList.innerHTML = '';
+        const daxDomainTitle = document.getElementById('daxDomainTitle');
+        const pqTableName = document.getElementById('pqTableName');
 
+        if (daxDomainTitle && domain) {
+            daxDomainTitle.textContent = `${domain.label} — DAX Measures (${daxMeasures.length})`;
+        }
+        if (pqTableName && domain) {
+            pqTableName.textContent = `LoadData.m (Target Table: '${domain.table_name}')`;
+        }
+
+        daxList.innerHTML = '';
         daxMeasures.forEach(m => {
             const card = document.createElement('div');
             card.className = 'code-card';
             card.innerHTML = `
                 <div class="code-card-header">
                     <div>
-                        <span class="code-card-title">${m.name}</span>
-                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">Format: <code>${m.format}</code></span>
+                        <span class="code-card-title">${escapeHtml(m.name)}</span>
+                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">Format: <code>${escapeHtml(m.format)}</code></span>
                     </div>
                     <button class="copy-btn" data-code="${encodeURIComponent(m.dax)}">Copy DAX</button>
                 </div>
@@ -403,7 +432,6 @@ document.addEventListener('DOMContentLoaded', () => {
             daxList.appendChild(card);
         });
 
-        // Power Query M Script
         const pqCode = document.getElementById('powerQueryMCode');
         if (pqCode) {
             pqCode.textContent = mScript;
@@ -435,7 +463,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function escapeHtml(str) {
-        return str
+        return String(str || '')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
@@ -448,7 +476,6 @@ document.addEventListener('DOMContentLoaded', () => {
         thead.innerHTML = '';
         tbody.innerHTML = '';
 
-        // Headers
         const trHead = document.createElement('tr');
         columns.forEach(c => {
             const th = document.createElement('th');
@@ -457,7 +484,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         thead.appendChild(trHead);
 
-        // Rows
         rows.forEach(row => {
             const tr = document.createElement('tr');
             columns.forEach(c => {
@@ -466,9 +492,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (c === 'status') {
                     const badgeClass = val === 'Completed' ? 'status-completed' : (val === 'Cancelled' ? 'status-cancelled' : 'status-pending');
                     td.innerHTML = `<span class="status-badge ${badgeClass}">${val}</span>`;
-                } else if (c.includes('revenue') || c.includes('price')) {
-                    td.textContent = formatCurrency(val);
-                    td.style.fontWeight = '500';
+                } else if (typeof val === 'number') {
+                    if (c.includes('revenue') || c.includes('price') || c.includes('spend') || c.includes('cost') || c.includes('salary') || c.includes('value')) {
+                        td.textContent = '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        td.style.fontWeight = '500';
+                    } else {
+                        td.textContent = val.toLocaleString();
+                    }
                 } else {
                     td.textContent = val !== null && val !== undefined ? val : '';
                 }
@@ -485,10 +515,8 @@ document.addEventListener('DOMContentLoaded', () => {
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const target = btn.getAttribute('data-tab');
-
             tabBtns.forEach(b => b.classList.remove('active'));
             tabPanels.forEach(p => p.classList.remove('active'));
-
             btn.classList.add('active');
             const panel = document.getElementById(target);
             if (panel) panel.classList.add('active');

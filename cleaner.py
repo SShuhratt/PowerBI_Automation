@@ -36,8 +36,10 @@ class SelfHealingCleaner:
         return clean.lower()
 
     def clean(self) -> pd.DataFrame:
-        # 1. Load data from file path or buffer (Excel or CSV)
-        if isinstance(self.file_input, str):
+        # 1. Load data from DataFrame, file path or buffer (Excel or CSV)
+        if isinstance(self.file_input, pd.DataFrame):
+            df = self.file_input.copy()
+        elif isinstance(self.file_input, str):
             if not os.path.exists(self.file_input):
                 raise FileNotFoundError(f"Input file not found: {self.file_input}")
             lower_name = self.file_input.lower()
@@ -83,23 +85,67 @@ class SelfHealingCleaner:
         self.audit_log["renamed_columns"] = col_map
         df.rename(columns=col_map, inplace=True)
 
-        # 4. Detect and Auto-Compute Missing Business Columns
-        # e.g. If 'total_revenue' is completely NaN, look for 'units_sold' and 'unit_price'
+        # 4. Detect and Auto-Compute Missing Business Columns across Domains
         for col in df.columns:
             if df[col].isna().all():
-                if any(k in col for k in ["revenue", "total", "amount"]):
-                    # Look for quantity/units and price
-                    qty_candidates = [c for c in df.columns if any(k in c for k in ["unit", "qty", "quantity", "sold", "count"])]
-                    price_candidates = [c for c in df.columns if any(k in c for k in ["price", "cost", "rate"])]
-
-                    if qty_candidates and price_candidates:
-                        qty_col = qty_candidates[0]
-                        price_col = price_candidates[0]
-                        df[col] = pd.to_numeric(df[qty_col], errors='coerce') * pd.to_numeric(df[price_col], errors='coerce')
+                # --- Sales: Revenue = Units * Price ---
+                if any(k in col for k in ["revenue", "total_rev", "sales_amount"]):
+                    qty_cands = [c for c in df.columns if any(k in c for k in ["unit", "qty", "quantity", "sold", "count"])]
+                    price_cands = [c for c in df.columns if any(k in c for k in ["price", "cost", "rate"])]
+                    if qty_cands and price_cands:
+                        df[col] = pd.to_numeric(df[qty_cands[0]], errors='coerce') * pd.to_numeric(df[price_cands[0]], errors='coerce')
                         self.audit_log["inferred_calculations"].append({
                             "column": col,
-                            "formula": f"{qty_col} * {price_col}",
-                            "status": f"Filled {len(df)} rows where column was completely blank."
+                            "formula": f"{qty_cands[0]} * {price_cands[0]}",
+                            "status": f"Filled {len(df)} rows where Sales Revenue was blank."
+                        })
+
+                # --- Marketing: CPC = Spend / Clicks ---
+                elif "cpc" in col or "cost_per_click" in col:
+                    spend_cands = [c for c in df.columns if any(k in c for k in ["spend", "cost", "budget"])]
+                    click_cands = [c for c in df.columns if "click" in c]
+                    if spend_cands and click_cands:
+                        df[col] = pd.to_numeric(df[spend_cands[0]], errors='coerce') / pd.to_numeric(df[click_cands[0]], errors='coerce').replace(0, np.nan)
+                        self.audit_log["inferred_calculations"].append({
+                            "column": col,
+                            "formula": f"{spend_cands[0]} / {click_cands[0]}",
+                            "status": f"Filled {len(df)} rows where CPC was blank."
+                        })
+
+                # --- Marketing: CTR = Clicks / Impressions ---
+                elif "ctr" in col or "click_through_rate" in col:
+                    click_cands = [c for c in df.columns if "click" in c]
+                    imp_cands = [c for c in df.columns if "impression" in c]
+                    if click_cands and imp_cands:
+                        df[col] = (pd.to_numeric(df[click_cands[0]], errors='coerce') / pd.to_numeric(df[imp_cands[0]], errors='coerce').replace(0, np.nan)) * 100
+                        self.audit_log["inferred_calculations"].append({
+                            "column": col,
+                            "formula": f"({click_cands[0]} / {imp_cands[0]}) * 100",
+                            "status": f"Filled {len(df)} rows where CTR (%) was blank."
+                        })
+
+                # --- Inventory: Stock Value = Units * Unit Cost ---
+                elif any(k in col for k in ["stock_value", "inventory_value", "total_cost"]):
+                    stock_cands = [c for c in df.columns if any(k in c for k in ["stock", "on_hand", "quantity", "units"])]
+                    cost_cands = [c for c in df.columns if any(k in c for k in ["unit_cost", "cost", "price"])]
+                    if stock_cands and cost_cands:
+                        df[col] = pd.to_numeric(df[stock_cands[0]], errors='coerce') * pd.to_numeric(df[cost_cands[0]], errors='coerce')
+                        self.audit_log["inferred_calculations"].append({
+                            "column": col,
+                            "formula": f"{stock_cands[0]} * {cost_cands[0]}",
+                            "status": f"Filled {len(df)} rows where Inventory Value was blank."
+                        })
+
+                # --- Finance: Net Income / Profit = Revenue - Expenses ---
+                elif any(k in col for k in ["net_income", "profit", "net_profit", "operating_profit"]):
+                    rev_cands = [c for c in df.columns if any(k in c for k in ["revenue", "income", "sales"])]
+                    exp_cands = [c for c in df.columns if any(k in c for k in ["expense", "cost", "opex"])]
+                    if rev_cands and exp_cands:
+                        df[col] = pd.to_numeric(df[rev_cands[0]], errors='coerce') - pd.to_numeric(df[exp_cands[0]], errors='coerce')
+                        self.audit_log["inferred_calculations"].append({
+                            "column": col,
+                            "formula": f"{rev_cands[0]} - {exp_cands[0]}",
+                            "status": f"Filled {len(df)} rows where Net Income was blank."
                         })
 
         # 5. Type Inference and Sanitization

@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoBI — Self-Healing Spreadsheet to Power BI Engine</title>
-    <meta name="description" content="Automate messy spreadsheet cleaning, summary row pruning, and instant Power BI semantic model & DAX measure generation.">
+    <title>AutoBI — Multi-Domain Self-Healing Spreadsheet to Power BI Engine</title>
+    <meta name="description" content="Automate messy spreadsheet cleaning, domain classification, and instant Power BI semantic model & DAX measure generation across Sales, Marketing, HR, Inventory, and Finance.">
     <!-- Google Fonts & Chart.js -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,12 +20,12 @@
                 <div class="brand-logo">BI</div>
                 <div class="brand-meta">
                     <h1>AutoBI Studio</h1>
-                    <p>Self-Healing Spreadsheet to Power BI Engine</p>
+                    <p>Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
                 </div>
             </div>
             <div class="header-badges">
                 <span class="badge badge-emerald">
-                    <span class="badge-pulse"></span> Engine Active
+                    <span class="badge-pulse"></span> Multi-Domain Engine Active
                 </span>
             </div>
         </header>
@@ -34,8 +34,8 @@
         <section class="hero-section">
             <h2 class="hero-title">From Messy Spreadsheets to Power BI in Seconds</h2>
             <p class="hero-subtitle">
-                Drop raw Excel or CSV files with human summary rows, schema drift, or blank columns. 
-                AutoBI self-heals data integrity and generates production-ready DAX measures.
+                Drop any business spreadsheet — Sales, Marketing, HR, Inventory, or Finance. 
+                AutoBI auto-detects the domain, cleanses human errors, and generates tailored DAX measures.
             </p>
         </section>
 
@@ -46,11 +46,22 @@
                 <div class="dropzone-icon">📁</div>
                 <div class="dropzone-prompt">
                     <h3>Drag & Drop your Excel or CSV file here</h3>
-                    <p>Supports .xlsx, .xls, or .csv up to 32MB</p>
+                    <p>Auto-detects Sales, Marketing, HR, Inventory, or Finance schemas</p>
                 </div>
                 <div class="dropzone-actions">
                     <button type="button" id="browseBtn" class="btn btn-primary">Browse Files</button>
-                    <button type="button" id="sampleBtn" class="btn btn-secondary">⚡ Try Demo Sample (Broken Total & Blank Revenue)</button>
+                    <button type="button" id="sampleBtn" class="btn btn-secondary">⚡ Try Demo Sample (Sales)</button>
+                </div>
+            </div>
+
+            <!-- Multi-Domain Demo Presets -->
+            <div class="demo-presets-container">
+                <span class="demo-presets-title">Or test with multi-domain demo presets:</span>
+                <div class="demo-pills">
+                    <button type="button" class="demo-pill-btn" data-domain="sales">🛍️ Sales & Orders</button>
+                    <button type="button" class="demo-pill-btn" data-domain="marketing">📣 Marketing & Paid Media</button>
+                    <button type="button" class="demo-pill-btn" data-domain="hr">👥 HR & People Ops</button>
+                    <button type="button" class="demo-pill-btn" data-domain="inventory">📦 Inventory & Supply Chain</button>
                 </div>
             </div>
 
@@ -70,17 +81,17 @@
         <div id="loadingCard" class="loading-card">
             <div class="spinner"></div>
             <h3 style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: #fff;">
-                Analyzing & Healing Dataset...
+                Analyzing, Classifying & Healing Dataset...
             </h3>
             <p id="loadingFileName" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">
                 Processing spreadsheet
             </p>
             <div class="loading-steps">
-                <span class="step-item active">1. Purging Trailer Rows</span>
+                <span class="step-item active">1. Identifying Domain</span>
                 <span>→</span>
-                <span class="step-item active">2. Inferring Missing Formulas</span>
+                <span class="step-item active">2. Purging Trailer Rows</span>
                 <span>→</span>
-                <span class="step-item active">3. Modeling DAX Measures</span>
+                <span class="step-item active">3. Modeling Domain DAX</span>
             </div>
         </div>
 
@@ -89,10 +100,25 @@
             <!-- Action Banner -->
             <div class="action-banner">
                 <div class="banner-left">
-                    <h2>Dataset Cleansed & Ready for Power BI</h2>
-                    <p>Source file: <strong id="activeFileBadge" style="color: #a5b4fc;">sample.xlsx</strong> • Model verified</p>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap;">
+                        <h2>Dataset Cleansed & Modeled</h2>
+                        <span id="domainBadge" class="domain-pill">🛍️ Sales & E-Commerce (96% match)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13px;">
+                        <span>Source: <strong id="activeFileBadge" style="color: #a5b4fc;">sample.xlsx</strong></span>
+                        <div class="domain-switcher-wrap">
+                            <label for="domainSelect" style="color: var(--text-muted);">Switch Model:</label>
+                            <select id="domainSelect" class="domain-select">
+                                <option value="sales">🛍️ Sales & Orders</option>
+                                <option value="marketing">📣 Marketing & Ads</option>
+                                <option value="hr">👥 HR & People Ops</option>
+                                <option value="inventory">📦 Inventory & Supply</option>
+                                <option value="finance">💳 Finance & Accounting</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
-                <div style="display: flex; gap: 12px;">
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                     <button id="resetUploadBtn" class="btn btn-secondary">Upload Another</button>
                     <button id="downloadZipBtn" class="btn btn-emerald">📥 Download Power BI Starter Kit (.zip)</button>
                 </div>
@@ -116,52 +142,23 @@
 
             <!-- Tab 1: Executive Dashboard -->
             <section id="tabDashboard" class="tab-panel active">
-                <!-- KPI Grid -->
-                <div class="kpi-grid">
-                    <div class="kpi-card">
-                        <div class="kpi-label">Total Gross Revenue</div>
-                        <div id="kpiRev" class="kpi-value">$0.00</div>
-                        <div class="kpi-subtext">Auto-computed from unit * price</div>
-                    </div>
-                    <div class="kpi-card cyan">
-                        <div class="kpi-label">Volume Sold</div>
-                        <div id="kpiUnits" class="kpi-value">0</div>
-                        <div class="kpi-subtext">Total catalog item units</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Unique Orders</div>
-                        <div id="kpiOrders" class="kpi-value">0</div>
-                        <div class="kpi-subtext">Distinct recorded transactions</div>
-                    </div>
-                    <div class="kpi-card amber">
-                        <div class="kpi-label">Average Order Value (AOV)</div>
-                        <div id="kpiAov" class="kpi-value">$0.00</div>
-                        <div class="kpi-subtext">DAX: DIVIDE([Revenue], [Orders])</div>
-                    </div>
-                    <div class="kpi-card emerald">
-                        <div class="kpi-label">Completed Revenue</div>
-                        <div id="kpiCompletedRev" class="kpi-value">$0.00</div>
-                        <div class="kpi-subtext">Fulfillable realized cashflow</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Cancellation Rate</div>
-                        <div id="kpiCancelRate" class="kpi-value">0.0%</div>
-                        <div id="kpiCancelSub" class="kpi-subtext">Operational risk metric</div>
-                    </div>
+                <!-- Dynamic KPI Grid -->
+                <div id="kpiGrid" class="kpi-grid">
+                    <!-- Populated dynamically by app.js based on detected domain -->
                 </div>
 
                 <!-- Charts Grid -->
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <h3>Gross Revenue by Product Category</h3>
+                        <h3 id="chart1Title">Primary Metric Breakdown</h3>
                         <div style="position: relative; height: 260px;">
-                            <canvas id="categoryChart"></canvas>
+                            <canvas id="chart1Canvas"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h3>Revenue Distribution by Region</h3>
+                        <h3 id="chart2Title">Distribution Breakdown</h3>
                         <div style="position: relative; height: 260px;">
-                            <canvas id="regionChart"></canvas>
+                            <canvas id="chart2Canvas"></canvas>
                         </div>
                     </div>
                 </div>
@@ -177,11 +174,11 @@
             <!-- Tab 3: Power BI & DAX Studio -->
             <section id="tabDax" class="tab-panel">
                 <div style="margin-bottom: 24px;">
-                    <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;">
-                        Production-Grade DAX Measures
+                    <h3 id="daxDomainTitle" style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                        Domain-Tailored DAX Measures
                     </h3>
-                    <p style="font-size: 13px; color: var(--text-muted);">
-                        Copy individual formulas directly into Power BI Desktop's "New Measure" bar.
+                    <p id="daxDomainSub" style="font-size: 13px; color: var(--text-muted);">
+                        Production business formulas ready for Power BI Desktop.
                     </p>
                 </div>
                 <div id="daxList">
@@ -198,7 +195,7 @@
                 </div>
                 <div class="code-card">
                     <div class="code-card-header">
-                        <span class="code-card-title">LoadData.m</span>
+                        <span id="pqTableName" class="code-card-title">LoadData.m (Table: Sales)</span>
                         <button id="copyMBtn" class="copy-btn">Copy M Script</button>
                     </div>
                     <pre id="powerQueryMCode" class="code-block"></pre>

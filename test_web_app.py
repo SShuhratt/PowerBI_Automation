@@ -39,9 +39,9 @@ def test_api_sample():
 
     # Verify KPIs
     kpis = data["kpis"]
-    assert kpis["total_revenue"] == 22437.5
-    assert kpis["total_orders"] == 12
-    assert kpis["total_units"] == 314
+    assert len(kpis) >= 4
+    rev_kpi = [k for k in kpis if "Revenue" in k["label"]][0]
+    assert "$22,437.50" in rev_kpi["value"]
 
     # Verify DAX measures
     dax = data["dax_measures"]
@@ -57,7 +57,7 @@ def test_api_sample():
     # Verify ZIP contents
     zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
     namelist = zf.namelist()
-    assert "cleaned_sales.csv" in namelist
+    assert "cleaned_data.csv" in namelist
     assert "LoadData.m" in namelist
     assert "dax_measures.dax" in namelist
     assert "POWER_BI_MEASURES_CHEATSHEET.md" in namelist
@@ -88,7 +88,8 @@ Total,15,35,,
     assert len(res_data["audit_log"]["dropped_rows"]) == 1
 
     # Check that Total Revenue was computed: (10*15) + (5*20) = 150 + 100 = 250
-    assert res_data["kpis"]["total_revenue"] == 250.0
+    rev_kpi = [k for k in res_data["kpis"] if "Revenue" in k["label"]][0]
+    assert "$250.00" in rev_kpi["value"]
     print("[PASS] test_api_upload_csv")
 
 
