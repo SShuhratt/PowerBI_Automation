@@ -19,8 +19,43 @@ from cleaner import SelfHealingCleaner
 from pbi_model import PowerBIModelGenerator
 from domain_classifier import DomainClassifier, DOMAINS
 
+import numpy as np
+import math
+
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB max upload
+app.json.sort_keys = False
+
+
+def sanitize_for_json(obj):
+    """Recursively ensure all dictionary keys are strings and numeric values are JSON compliant."""
+    if isinstance(obj, dict):
+        return {str(k): sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple, set)):
+        return [sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
+    elif isinstance(obj, (float, np.floating)):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return float(obj)
+    elif isinstance(obj, (int, np.integer)):
+        return int(obj)
+    elif isinstance(obj, (datetime, pd.Timestamp)):
+        return obj.isoformat()
+    elif isinstance(obj, uuid.UUID):
+        return str(obj)
+    elif isinstance(obj, bytes):
+        return obj.decode('utf-8', errors='ignore')
+    elif obj is None:
+        return None
+    try:
+        if pd.isna(obj):
+            return None
+    except Exception:
+        pass
+    return obj
+
 
 # In-memory session artifact cache: session_id -> { artifacts, created_at }
 SESSIONS = {}
@@ -276,13 +311,119 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
                 "data": {str(k): int(v) for k, v in df.groupby("warehouse")[stock_col].sum().items()}
             }
 
+    elif domain_key == "finance":
+        rev_col = None
+        for c in cols:
+            if any(k in c for k in ["revenue", "income", "sales", "actual"]):
+                rev_col = c
+                break
+        exp_col = None
+        for c in cols:
+            if any(k in c for k in ["expense", "opex", "cost", "spending"]):
+                exp_col = c
+                break
+        profit_col = None
+        for c in cols:
+            if any(k in c for k in ["profit", "net_income", "margin"]):
+                profit_col = c
+                break
+        budget_col = None
+        for c in cols:
+            if "budget" in c:
+                budget_col = c
+                break
+        account_col = None
+        for c in cols:
+            if any(k in c for k in ["account", "gl_code", "category", "entity"]):
+                account_col = c
+                break
+
+        tot_rev = float(df[rev_col].sum()) if rev_col and pd.api.types.is_numeric_dtype(df[rev_col]) else 0.0
+        tot_exp = float(df[exp_col].sum()) if exp_col and pd.api.types.is_numeric_dtype(df[exp_col]) else 0.0
+        net_prof = float(df[profit_col].sum()) if profit_col and pd.api.types.is_numeric_dtype(df[profit_col]) else (tot_rev - tot_exp if rev_col and exp_col else 0.0)
+        margin = (net_prof / tot_rev * 100) if tot_rev > 0 else 0.0
+        tot_budget = float(df[budget_col].sum()) if budget_col and pd.api.types.is_numeric_dtype(df[budget_col]) else 0.0
+        variance = (tot_rev - tot_budget) if rev_col and budget_col else 0.0
+        accts = int(df[account_col].nunique()) if account_col else len(df)
+
+        kpis = [
+            {"label": "Total Revenue / Inflow", "value": f"${tot_rev:,.2f}" if tot_rev > 0 else f"{tot_rev:,.0f}", "sub": "Operating inflow", "theme": "emerald"},
+            {"label": "Operating Expenses", "value": f"${tot_exp:,.2f}" if tot_exp > 0 else f"{tot_exp:,.0f}", "sub": "Recorded expenditure", "theme": "rose"},
+            {"label": "Net Operating Profit", "value": f"${net_prof:,.2f}" if net_prof != 0 else f"{net_prof:,.0f}", "sub": "Earnings before taxes", "theme": "emerald" if net_prof >= 0 else "rose"},
+            {"label": "Operating Margin", "value": f"{margin:.1f}%", "sub": "Profit conversion rate", "theme": "cyan"},
+            {"label": "Budget Target", "value": f"${tot_budget:,.2f}" if tot_budget > 0 else f"{tot_budget:,.0f}", "sub": f"Variance: ${variance:,.0f}", "theme": "amber"},
+            {"label": "Active GL Accounts", "value": f"{accts:,}", "sub": "Monitored accounts / entities", "theme": ""}
+        ]
+
+        if account_col and exp_col and pd.api.types.is_numeric_dtype(df[exp_col]):
+            charts["chart1"] = {
+                "title": f"Expenses by {account_col.replace('_', ' ').title()}",
+                "type": "bar",
+                "data": {str(k): round(float(v), 2) for k, v in df.groupby(account_col)[exp_col].sum().head(10).items()}
+            }
+        elif account_col and rev_col and pd.api.types.is_numeric_dtype(df[rev_col]):
+            charts["chart1"] = {
+                "title": f"Revenue by {account_col.replace('_', ' ').title()}",
+                "type": "bar",
+                "data": {str(k): round(float(v), 2) for k, v in df.groupby(account_col)[rev_col].sum().head(10).items()}
+            }
+        if account_col:
+            charts["chart2"] = {
+                "title": f"Distribution by {account_col.replace('_', ' ').title()}",
+                "type": "doughnut",
+                "data": {str(k): int(v) for k, v in df[account_col].value_counts().head(8).items()}
+            }
+
+    elif domain_key == "generic":
+        total_records = len(df)
+        total_cols = len(cols)
+        total_cells = max(total_records * total_cols, 1)
+        filled_cells = int(df.notna().sum().sum())
+        completeness = (filled_cells / total_cells) * 100.0
+
+        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+        cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(df[c])]
+
+        first_cat = cat_cols[0] if cat_cols else (cols[0] if cols else "item")
+        unique_entities = int(df[first_cat].nunique()) if first_cat in cols else total_records
+
+        kpis = [
+            {"label": "Total Records", "value": f"{total_records:,}", "sub": "Recorded rows / observations", "theme": "emerald"},
+            {"label": "Data Fields / Dimensions", "value": f"{total_cols:,}", "sub": "Tracked attributes", "theme": "cyan"},
+            {"label": "Data Completeness", "value": f"{completeness:.1f}%", "sub": f"{filled_cells:,} non-empty data points", "theme": "emerald" if completeness >= 80 else "amber"},
+            {"label": "Primary Entities", "value": f"{unique_entities:,}", "sub": f"Unique {first_cat.replace('_', ' ').title()}", "theme": ""},
+            {"label": "Numeric Metrics", "value": f"{len(num_cols):,}", "sub": "Calculable numeric fields", "theme": "cyan"},
+            {"label": "Text / Categorical Fields", "value": f"{len(cat_cols):,}", "sub": "Descriptive dimensions", "theme": ""}
+        ]
+
+        col_fill_rates = {str(c): round(float(df[c].notna().mean() * 100), 1) for c in cols[:10]}
+        charts["chart1"] = {
+            "title": "Field Fill Rate (% Valid Data)",
+            "type": "bar",
+            "data": col_fill_rates
+        }
+
+        if cat_cols and num_cols:
+            n_col = num_cols[0]
+            charts["chart2"] = {
+                "title": f"{n_col.replace('_', ' ').title()} by {first_cat.replace('_', ' ').title()}",
+                "type": "bar",
+                "data": {str(k): round(float(v), 2) for k, v in df.groupby(first_cat)[n_col].sum().head(8).items()}
+            }
+        elif cat_cols:
+            charts["chart2"] = {
+                "title": f"Observations by {first_cat.replace('_', ' ').title()}",
+                "type": "doughnut",
+                "data": {str(k): int(v) for k, v in df[first_cat].value_counts().head(8).items()}
+            }
+
     else:
         # Default to Sales Domain
-        total_rev = float(df["total_revenue"].sum()) if "total_revenue" in cols else 0.0
-        total_units = int(df["units_sold"].sum()) if "units_sold" in cols else 0
+        total_rev = float(df["total_revenue"].sum()) if "total_revenue" in cols and pd.api.types.is_numeric_dtype(df["total_revenue"]) else 0.0
+        total_units = int(df["units_sold"].sum()) if "units_sold" in cols and pd.api.types.is_numeric_dtype(df["units_sold"]) else 0
         total_orders = int(df["order_id"].nunique()) if "order_id" in cols else len(df)
         aov = (total_rev / total_orders) if total_orders > 0 else 0.0
-        completed_rev = float(df[df["status"] == "Completed"]["total_revenue"].sum()) if "status" in cols and "total_revenue" in cols else 0.0
+        completed_rev = float(df[df["status"] == "Completed"]["total_revenue"].sum()) if "status" in cols and "total_revenue" in cols and pd.api.types.is_numeric_dtype(df["total_revenue"]) else 0.0
         cancel_rate = (len(df[df["status"] == "Cancelled"]) / len(df) * 100) if "status" in cols and len(df) > 0 else 0.0
 
         kpis = [
@@ -294,13 +435,13 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
             {"label": "Cancellation Rate", "value": f"{cancel_rate:.1f}%", "sub": "Operational risk", "theme": "rose"}
         ]
 
-        if "category" in cols and "total_revenue" in cols:
+        if "category" in cols and "total_revenue" in cols and pd.api.types.is_numeric_dtype(df["total_revenue"]):
             charts["chart1"] = {
                 "title": "Revenue by Product Category",
                 "type": "bar",
                 "data": {str(k): round(float(v), 2) for k, v in df.groupby("category")["total_revenue"].sum().items()}
             }
-        if "region" in cols and "total_revenue" in cols:
+        if "region" in cols and "total_revenue" in cols and pd.api.types.is_numeric_dtype(df["total_revenue"]):
             charts["chart2"] = {
                 "title": "Revenue Distribution by Region",
                 "type": "doughnut",
@@ -315,7 +456,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
 
     records = preview_df.fillna("").to_dict(orient="records")
 
-    return {
+    payload = {
         "success": True,
         "session_id": session_id,
         "filename": filename,
@@ -339,6 +480,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "table_columns": list(df.columns),
         "table_records": records,
     }
+    return sanitize_for_json(payload)
 
 
 @app.route("/")
@@ -371,6 +513,8 @@ def upload_file():
         result = build_analysis_payload(cleaner, df_clean, filename, domain_override=domain_override)
         return jsonify(result)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 

@@ -26,13 +26,27 @@ class SelfHealingCleaner:
             "datatype_conversions": {},
         }
 
-    def _clean_column_name(self, col: str) -> str:
+    def _clean_column_name(self, col) -> str:
         """Standardize column names for clean DAX / Power Query use."""
-        clean = str(col).strip()
-        # Remove currency symbols and parentheses like ($), (€)
-        clean = re.sub(r'[\(\[\{][\$\€\£\¥\s\w]*[\)\]\}]', '', clean).strip()
-        # Replace spaces, hyphens, slashes with single space
-        clean = re.sub(r'[\s\-_/]+', '_', clean).strip('_')
+        clean = str(col).strip() if pd.notna(col) else ""
+        # Handle 'Unnamed: ...', nan, None
+        if not clean or clean.lower().startswith("unnamed:") or clean.lower() in ("nan", "none", "null"):
+            return "col"
+        # Remove currency symbols and parenthesized units like ($), (€), (so'm), [USD], (ROI)
+        clean = re.sub(r'[\(\[\{][\$\€\£\¥\s\w\.\'\"]*[\)\]\}]', '', clean).strip()
+        # Remove remaining brackets and punctuation
+        clean = re.sub(r'[(){}\[\]]', '', clean).strip()
+        # Remove quotation marks, apostrophes, backticks
+        clean = re.sub(r"['\"`]", "", clean).strip()
+        # Replace spaces, hyphens, slashes, plus, percent, ampersand, hash with single underscore
+        clean = re.sub(r'[\s\-_/\\.:,;+&%#]+', '_', clean).strip('_')
+        # If clean is empty or digits, format cleanly
+        if not clean:
+            clean = "col"
+        elif clean.isdigit() and len(clean) == 4 and (clean.startswith("19") or clean.startswith("20")):
+            clean = f"year_{clean}"
+        elif clean[0].isdigit():
+            clean = f"col_{clean}"
         return clean.lower()
 
     def clean(self) -> pd.DataFrame:
@@ -56,6 +70,26 @@ class SelfHealingCleaner:
 
         self.audit_log["raw_row_count"] = len(df)
 
+        # Detect leading title banner / header offset (e.g. Row 0 is empty or title banner, headers on Row 1 or 2)
+        if len(df) > 1 and len(df.columns) > 1:
+            unnamed_count = sum(1 for c in df.columns if str(c).lower().startswith("unnamed:") or pd.isna(c) or str(c).strip() == "")
+            unnamed_ratio = unnamed_count / max(len(df.columns), 1)
+            if unnamed_ratio >= 0.6:
+                for cand_idx in range(min(5, len(df))):
+                    cand_row = df.iloc[cand_idx]
+                    cand_non_null = cand_row.notna().sum()
+                    if cand_non_null >= 2 and (cand_non_null / len(df.columns)) >= 0.5:
+                        self.audit_log["header_promoted_from_row"] = cand_idx + 1
+                        df.columns = [str(val).strip() if pd.notna(val) else f"col_{i}" for i, val in enumerate(cand_row)]
+                        df = df.iloc[cand_idx + 1:].reset_index(drop=True)
+                        break
+
+        # Standardize common null/dash placeholders (e.g. '—', '–', 'N/A', Excel errors)
+        df.replace({
+            r'^\s*[—–\-]+\s*$': np.nan,
+            r'^\s*(N/A|n/a|#N/A|#VALUE!|#REF!|#DIV/0!|#NAME\?|#NUM!|#NULL!|None|NULL|null)\s*$': np.nan
+        }, regex=True, inplace=True)
+
         # 2. Detect and eliminate human-added summary/trailer rows (e.g. 'Total', 'Subtotal')
         non_summary_indices = []
         for idx, row in df.iterrows():
@@ -71,19 +105,30 @@ class SelfHealingCleaner:
                 self.audit_log["dropped_rows"].append({
                     "row_index": int(idx),
                     "reason": reason,
-                    "content_preview": {k: str(v) for k, v in row.to_dict().items() if pd.notna(v)}
+                    "content_preview": {str(k): str(v) for k, v in row.to_dict().items() if pd.notna(v)}
                 })
             else:
                 non_summary_indices.append(idx)
 
         df = df.loc[non_summary_indices].copy().reset_index(drop=True)
 
-        # 3. Standardize Column Names
+        # 3. Standardize Column Names (De-duplicate and guarantee string keys)
         original_cols = list(df.columns)
-        new_cols = [self._clean_column_name(col) for col in original_cols]
-        col_map = dict(zip(original_cols, new_cols))
+        new_cols = []
+        seen = {}
+        for i, col in enumerate(original_cols):
+            base_clean = self._clean_column_name(col)
+            if base_clean in seen:
+                seen[base_clean] += 1
+                col_name = f"{base_clean}_{seen[base_clean]}"
+            else:
+                seen[base_clean] = 1
+                col_name = base_clean
+            new_cols.append(col_name)
+
+        col_map = {str(orig): str(new) for orig, new in zip(original_cols, new_cols)}
         self.audit_log["renamed_columns"] = col_map
-        df.rename(columns=col_map, inplace=True)
+        df.columns = new_cols
 
         # 4. Detect and Auto-Compute Missing Business Columns across Domains
         for col in df.columns:
@@ -150,24 +195,38 @@ class SelfHealingCleaner:
 
         # 5. Type Inference and Sanitization
         for col in df.columns:
+            str_col = str(col)
             # Check for date candidates
-            if "date" in col or "time" in col:
+            if "date" in str_col or "time" in str_col:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
-                self.audit_log["datatype_conversions"][col] = "datetime64"
-            elif any(k in col for k in ["price", "revenue", "cost", "margin", "amount"]):
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                self.audit_log["datatype_conversions"][col] = "float64"
-            elif any(k in col for k in ["units", "quantity", "count", "id"]):
+                self.audit_log["datatype_conversions"][str_col] = "datetime64"
+            elif any(k in str_col for k in ["price", "revenue", "cost", "margin", "amount", "spend", "salary", "budget", "profit", "opex", "capex"]):
+                if df[col].dtype == object:
+                    clean_series = df[col].astype(str).str.replace(r'[^\d,.\-]', '', regex=True).str.replace(',', '.')
+                    df[col] = pd.to_numeric(clean_series, errors='coerce')
+                else:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                self.audit_log["datatype_conversions"][str_col] = "float64"
+            elif any(k in str_col for k in ["units", "quantity", "count", "clicks", "impressions", "conversions"]):
                 try:
-                    df[col] = pd.to_numeric(df[col])
-                    self.audit_log["datatype_conversions"][col] = "numeric"
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    self.audit_log["datatype_conversions"][str_col] = "numeric"
                 except Exception:
-                    df[col] = df[col].astype(str).str.strip()
-                    self.audit_log["datatype_conversions"][col] = "string"
+                    df[col] = df[col].apply(lambda v: str(v).strip() if pd.notna(v) else np.nan)
+                    self.audit_log["datatype_conversions"][str_col] = "string"
             else:
                 if df[col].dtype == object:
-                    df[col] = df[col].astype(str).str.strip()
-                    self.audit_log["datatype_conversions"][col] = "string"
+                    non_nulls = df[col].dropna()
+                    if len(non_nulls) > 0:
+                        # Try parsing as numeric if majority look numeric (handling space thousands and comma decimals)
+                        clean_cand = non_nulls.astype(str).str.strip().str.replace(',', '.', regex=False).str.replace(' ', '', regex=False)
+                        converted = pd.to_numeric(clean_cand, errors='coerce')
+                        if converted.notna().mean() >= 0.75:
+                            df[col] = pd.to_numeric(df[col].astype(str).str.strip().str.replace(',', '.', regex=False).str.replace(' ', '', regex=False), errors='coerce')
+                            self.audit_log["datatype_conversions"][str_col] = "numeric"
+                            continue
+                    df[col] = df[col].apply(lambda v: str(v).strip() if pd.notna(v) else np.nan)
+                    self.audit_log["datatype_conversions"][str_col] = "string"
 
         self.audit_log["cleaned_row_count"] = len(df)
         return df

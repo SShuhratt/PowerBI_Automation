@@ -418,16 +418,39 @@ class PowerBIModelGenerator:
                 "description": "Total rows recorded in dataset."
             }
         ]
-        # Look for first numeric column
+        # Generate SUM & AVERAGE for any numeric columns
         for c in cols:
             if pd.api.types.is_numeric_dtype(self.df[c]):
+                clean_name = c.replace('_', ' ').title()
                 measures.append({
-                    "name": f"Total {c.replace('_', ' ').title()}",
-                    "dax": f"Total {c.replace('_', ' ').title()} = SUM('{self.table_name}'[{c}])",
+                    "name": f"Total {clean_name}",
+                    "dax": f"Total {clean_name} = SUM('{self.table_name}'[{c}])",
                     "format": "#,##0.00",
                     "description": f"Cumulative sum of '{c}'."
                 })
-                break
+                measures.append({
+                    "name": f"Average {clean_name}",
+                    "dax": f"Average {clean_name} = AVERAGE('{self.table_name}'[{c}])",
+                    "format": "#,##0.00",
+                    "description": f"Average value of '{c}'."
+                })
+                if len(measures) >= 5:
+                    break
+
+        # If few measures, generate DISTINCTCOUNT for first 1-2 categorical columns
+        if len(measures) < 4:
+            for c in cols:
+                if not pd.api.types.is_numeric_dtype(self.df[c]):
+                    clean_name = c.replace('_', ' ').title()
+                    measures.append({
+                        "name": f"Unique {clean_name}",
+                        "dax": f"Unique {clean_name} = DISTINCTCOUNT('{self.table_name}'[{c}])",
+                        "format": "#,##0",
+                        "description": f"Count of distinct values in '{c}'."
+                    })
+                    if len(measures) >= 4:
+                        break
+
         return measures
 
     def generate_power_query_m(self) -> str:
