@@ -102,9 +102,10 @@ def test_multi_domain_dax_generation():
 
 def test_api_multi_domain_presets():
     client = app.test_client()
+    headers = {"X-Workspace-Key": "autobi2026"}
 
     for domain in ["sales", "marketing", "hr", "inventory"]:
-        res = client.post("/api/sample", json={"domain": domain})
+        res = client.post("/api/sample", json={"domain": domain}, headers=headers)
         assert res.status_code == 200
         data = res.get_json()
         assert data["success"] is True

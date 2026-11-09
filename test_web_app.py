@@ -8,19 +8,58 @@ import zipfile
 from web_app import app
 
 
+AUTH_HEADERS = {"X-Workspace-Key": "autobi2026"}
+
+
+def test_auth_flow():
+    """Verify workspace passcode authentication gate and session security."""
+    client = app.test_client()
+
+    # 1. Check status initially (unauthenticated)
+    st_res = client.get("/api/auth/status")
+    assert st_res.status_code == 200
+    assert st_res.get_json()["authenticated"] is False
+
+    # 2. Reject unauthenticated sample request
+    unauth_res = client.post("/api/sample")
+    assert unauth_res.status_code == 401
+    assert unauth_res.get_json()["auth_required"] is True
+
+    # 3. Wrong passcode rejected
+    wrong_login = client.post("/api/auth/login", json={"passcode": "wrong_code"})
+    assert wrong_login.status_code == 401
+
+    # 4. Correct passcode accepted and cookie set
+    good_login = client.post("/api/auth/login", json={"passcode": "autobi2026", "email": "director@company.com"})
+    assert good_login.status_code == 200
+    assert good_login.get_json()["success"] is True
+
+    # 5. Status now authenticated
+    st_after = client.get("/api/auth/status")
+    assert st_after.get_json()["authenticated"] is True
+    assert st_after.get_json()["user"] == "director@company.com"
+
+    # 6. Logout clears session
+    logout_res = client.post("/api/auth/logout")
+    assert logout_res.status_code == 200
+    assert client.get("/api/auth/status").get_json()["authenticated"] is False
+    print("[PASS] test_auth_flow (Access Gate, Passcode verification & Logout)")
+
+
 def test_index_route():
     client = app.test_client()
     res = client.get("/")
     assert res.status_code == 200
     assert b"AutoBI Studio" in res.data
     assert b"dropzone" in res.data
+    assert b"Zero-Persistence Guarantee" in res.data
     assert b"Download Power BI Starter Kit" in res.data
     print("[PASS] test_index_route")
 
 
 def test_api_sample():
     client = app.test_client()
-    res = client.post("/api/sample")
+    res = client.post("/api/sample", headers=AUTH_HEADERS)
     assert res.status_code == 200
     data = res.get_json()
     assert data["success"] is True
@@ -54,7 +93,7 @@ def test_api_sample():
     assert dl_res.status_code == 200
     assert dl_res.mimetype == "application/zip"
 
-    # Verify ZIP contents
+    # Verify ZIP contents (including native Power BI Project .pbip bundle)
     zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
     namelist = zf.namelist()
     assert "cleaned_data.csv" in namelist
@@ -64,9 +103,12 @@ def test_api_sample():
     assert "audit_log.json" in namelist
     assert "Executive_Dashboard_Preview.html" in namelist
     assert "QuickLaunch_PowerBI.bat" in namelist
+    assert "AutoBI_Project.pbip" in namelist
+    assert "AutoBI_Project.SemanticModel/definition/model.bim" in namelist
+    assert "AutoBI_Project.Report/definition/report.json" in namelist
     assert "README.txt" in namelist
 
-    print("[PASS] test_api_sample & test_download_zip")
+    print("[PASS] test_api_sample & test_download_zip (with native .pbip bundle)")
 
 
 def test_api_upload_csv():
@@ -80,7 +122,7 @@ Total,15,35,,
     data = {
         'file': (io.BytesIO(csv_content.encode('utf-8')), 'test_upload.csv')
     }
-    res = client.post("/api/upload", data=data, content_type='multipart/form-data')
+    res = client.post("/api/upload", data=data, content_type='multipart/form-data', headers=AUTH_HEADERS)
     assert res.status_code == 200
     res_data = res.get_json()
     assert res_data["success"] is True
@@ -136,7 +178,7 @@ def test_multi_sheet_and_encoding():
     excel_buf.seek(0)
 
     # Test /api/sheets inspection
-    sheets_res = client.post("/api/sheets", data={'file': (io.BytesIO(excel_buf.getvalue()), 'multi.xlsx')}, content_type='multipart/form-data')
+    sheets_res = client.post("/api/sheets", data={'file': (io.BytesIO(excel_buf.getvalue()), 'multi.xlsx')}, content_type='multipart/form-data', headers=AUTH_HEADERS)
     assert sheets_res.status_code == 200
     s_data = sheets_res.get_json()
     assert s_data["has_multiple"] is True
@@ -144,7 +186,7 @@ def test_multi_sheet_and_encoding():
 
     # Test smart selection (should auto-pick Sales_Data because it has the most rows/cells)
     excel_buf.seek(0)
-    upload_res = client.post("/api/upload", data={'file': (excel_buf, 'multi.xlsx')}, content_type='multipart/form-data')
+    upload_res = client.post("/api/upload", data={'file': (excel_buf, 'multi.xlsx')}, content_type='multipart/form-data', headers=AUTH_HEADERS)
     assert upload_res.status_code == 200
     u_data = upload_res.get_json()
     assert u_data["sheet_info"]["selected_sheet"] == "Sales_Data"
@@ -153,7 +195,7 @@ def test_multi_sheet_and_encoding():
     # 2. Cyrillic Windows-1251 / CP1251 CSV
     cyrillic_csv = "Товар;Количество;Цена;Итого\nНоутбук;2;1200;\nМышь;5;25;\nИтого;7;1225;\n"
     cyrillic_bytes = cyrillic_csv.encode("cp1251")
-    c_res = client.post("/api/upload", data={'file': (io.BytesIO(cyrillic_bytes), 'report_1c.csv')}, content_type='multipart/form-data')
+    c_res = client.post("/api/upload", data={'file': (io.BytesIO(cyrillic_bytes), 'report_1c.csv')}, content_type='multipart/form-data', headers=AUTH_HEADERS)
     assert c_res.status_code == 200
     c_data = c_res.get_json()
     assert c_data["audit_log"]["cleaned_row_count"] == 2
@@ -164,7 +206,7 @@ def test_multi_sheet_and_encoding():
 def test_preview_and_purge():
     """Verify live executive dashboard preview and explicit data privacy purge."""
     client = app.test_client()
-    sample_res = client.post("/api/sample")
+    sample_res = client.post("/api/sample", headers=AUTH_HEADERS)
     session_id = sample_res.get_json()["session_id"]
 
     # 1. Test Executive Preview HTML endpoint
@@ -190,6 +232,7 @@ def test_preview_and_purge():
 
 
 if __name__ == "__main__":
+    test_auth_flow()
     test_index_route()
     test_api_sample()
     test_api_upload_csv()

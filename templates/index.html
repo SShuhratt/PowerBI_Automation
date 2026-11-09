@@ -24,6 +24,10 @@
                 </div>
             </div>
             <div class="header-badges">
+                <span id="userStatusBadge" class="badge badge-emerald" style="display: none;">
+                    <span class="badge-pulse"></span> <span id="userEmailSpan">Authenticated</span>
+                </span>
+                <button type="button" id="logoutBtn" class="btn btn-secondary" style="display: none; padding: 5px 12px; font-size: 12px;">Sign Out</button>
                 <span class="badge badge-emerald">
                     <span class="badge-pulse"></span> Multi-Domain Engine Active
                 </span>
@@ -38,6 +42,22 @@
                 AutoBI auto-detects the domain, cleanses human errors, and generates tailored DAX measures.
             </p>
         </section>
+
+        <!-- Enterprise Zero-Persistence Guarantee Banner -->
+        <div class="enterprise-trust-banner">
+            <div class="trust-badge-group">
+                <span class="trust-shield">🛡️</span>
+                <span class="trust-badge-label">Zero-Persistence Guarantee:</span>
+            </div>
+            <p class="trust-guarantee-text">
+                Your data is processed in memory and permanently deleted after your session. We do not store or train models on your data.
+            </p>
+            <div class="trust-chips">
+                <span class="trust-chip">🔒 Ephemeral In-Memory Storage</span>
+                <span class="trust-chip">⚡ 1-Click Explicit Purge</span>
+                <span class="trust-chip">🚫 No AI Model Training</span>
+            </div>
+        </div>
 
         <!-- Upload Card -->
         <div id="uploadCard" class="upload-card">
@@ -229,6 +249,35 @@
                 </div>
             </section>
         </main>
+
+        <!-- Workspace Authentication Gate (Modal Overlay) -->
+        <div id="authGateModal" class="auth-modal-overlay" style="display: none;">
+            <div class="auth-modal-card">
+                <div class="auth-modal-header">
+                    <div class="brand-logo" style="margin: 0 auto 14px;">BI</div>
+                    <h3>Enterprise Workspace Gate</h3>
+                    <p>Enter your authorized work email and workspace access passcode to unlock AutoBI Studio.</p>
+                </div>
+                <form id="authForm" class="auth-form">
+                    <div class="auth-field">
+                        <label for="authEmailInput">Work Email</label>
+                        <input type="email" id="authEmailInput" placeholder="analyst@company.com" required value="analyst@enterprise.local">
+                    </div>
+                    <div class="auth-field">
+                        <label for="authPasscodeInput">Workspace Access Passcode</label>
+                        <input type="password" id="authPasscodeInput" placeholder="Enter access passcode" required>
+                        <span class="auth-hint">Default pilot passcode: <code>autobi2026</code></span>
+                    </div>
+                    <div id="authErrorMsg" class="auth-error-msg" style="display: none;"></div>
+                    <button type="submit" id="authSubmitBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; padding: 12px;">
+                        🔓 Unlock Workspace
+                    </button>
+                </form>
+                <div class="auth-footer">
+                    🔒 Protected by isolated multi-worker session security & TLS encryption.
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

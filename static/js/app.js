@@ -22,6 +22,86 @@ document.addEventListener('DOMContentLoaded', () => {
     const previewDashboardBtn = document.getElementById('previewDashboardBtn');
     const purgeDataBtn = document.getElementById('purgeDataBtn');
     const purgeBanner = document.getElementById('purgeBanner');
+    const authGateModal = document.getElementById('authGateModal');
+    const authForm = document.getElementById('authForm');
+    const authEmailInput = document.getElementById('authEmailInput');
+    const authPasscodeInput = document.getElementById('authPasscodeInput');
+    const authErrorMsg = document.getElementById('authErrorMsg');
+    const userStatusBadge = document.getElementById('userStatusBadge');
+    const userEmailSpan = document.getElementById('userEmailSpan');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    // Check workspace authentication status
+    async function checkAuthStatus() {
+        try {
+            const res = await fetch('/api/auth/status');
+            const data = await res.json();
+            if (data.auth_enabled) {
+                if (!data.authenticated) {
+                    if (authGateModal) authGateModal.style.display = 'flex';
+                    if (userStatusBadge) userStatusBadge.style.display = 'none';
+                    if (logoutBtn) logoutBtn.style.display = 'none';
+                } else {
+                    if (authGateModal) authGateModal.style.display = 'none';
+                    if (userStatusBadge) {
+                        userStatusBadge.style.display = 'inline-flex';
+                        if (userEmailSpan) userEmailSpan.textContent = data.user || 'Authenticated';
+                    }
+                    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                }
+            } else {
+                if (authGateModal) authGateModal.style.display = 'none';
+            }
+        } catch (e) {
+            console.error('Failed to verify auth status', e);
+        }
+    }
+
+    if (authForm) {
+        authForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (authErrorMsg) authErrorMsg.style.display = 'none';
+            const email = authEmailInput ? authEmailInput.value.trim() : '';
+            const passcode = authPasscodeInput ? authPasscodeInput.value.trim() : '';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email, passcode: passcode })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (authGateModal) authGateModal.style.display = 'none';
+                    if (userStatusBadge) {
+                        userStatusBadge.style.display = 'inline-flex';
+                        if (userEmailSpan) userEmailSpan.textContent = data.user || email;
+                    }
+                    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                } else {
+                    if (authErrorMsg) {
+                        authErrorMsg.textContent = data.error || 'Authentication failed.';
+                        authErrorMsg.style.display = 'block';
+                    }
+                }
+            } catch (err) {
+                if (authErrorMsg) {
+                    authErrorMsg.textContent = 'Server connection error: ' + err.message;
+                    authErrorMsg.style.display = 'block';
+                }
+            }
+        });
+    }
+
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.reload();
+        });
+    }
+
+    // Call on load
+    checkAuthStatus();
 
     // Chart Instances
     let chart1Instance = null;

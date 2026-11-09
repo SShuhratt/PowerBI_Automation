@@ -12,6 +12,7 @@ import json
 import zipfile
 from datetime import datetime, timedelta
 from typing import Optional
+import functools
 import pandas as pd
 from flask import Flask, request, jsonify, render_template, send_file
 
@@ -20,6 +21,7 @@ from pbi_model import PowerBIModelGenerator
 from domain_classifier import DomainClassifier, DOMAINS
 from session_store import sessions
 from dashboard_preview import generate_html_dashboard
+from pbip_generator import generate_pbip_artifacts
 
 import numpy as np
 import math
@@ -27,6 +29,40 @@ import math
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB max upload
 app.json.sort_keys = False
+
+# Authentication configuration
+WORKSPACE_PASSCODE = os.environ.get("WORKSPACE_PASSCODE", "autobi2026")
+AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def get_current_user():
+    if not AUTH_ENABLED:
+        return "pilot@autobi.local"
+    # 1. Check HTTP-only cookie
+    user_cookie = request.cookies.get("autobi_user")
+    if user_cookie:
+        return user_cookie
+    # 2. Check X-Workspace-Key header (for automated scripts / API tests)
+    key_header = request.headers.get("X-Workspace-Key")
+    if key_header == WORKSPACE_PASSCODE:
+        return "api-client@autobi.local"
+    return None
+
+
+def require_auth(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+        user = get_current_user()
+        if not user:
+            return jsonify({
+                "success": False,
+                "error": "Workspace authentication required. Please unlock with workspace passcode.",
+                "auth_required": True
+            }), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 def sanitize_for_json(obj):
@@ -445,7 +481,10 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
     # 8. Generate standalone Executive HTML dashboard
     dashboard_html = generate_html_dashboard(df, kpis, charts, domain_info, filename)
 
-    # Persist session with artifacts and dashboard preview
+    # 9. Generate Native Power BI Project (.pbip) artifacts
+    pbip_files = generate_pbip_artifacts(df, model_gen.table_name, measures, m_script)
+
+    # Persist session with artifacts, dashboard preview and PBIP bundle
     sessions.set(session_id, {
         "created_at": datetime.now().isoformat(),
         "cleaned_csv": cleaned_csv_str,
@@ -456,6 +495,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "readme": readme_content,
         "filename": filename,
         "dashboard_html": dashboard_html,
+        "pbip_files": pbip_files,
     })
 
     payload = {
@@ -494,7 +534,43 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/auth/status")
+def auth_status():
+    user = get_current_user()
+    return jsonify({
+        "auth_enabled": AUTH_ENABLED,
+        "authenticated": user is not None,
+        "user": user
+    })
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    data = request.get_json(silent=True) or {}
+    passcode = data.get("passcode", "").strip()
+    email = data.get("email", "").strip() or "analyst@enterprise.local"
+
+    if not passcode or passcode != WORKSPACE_PASSCODE:
+        return jsonify({"success": False, "error": "Invalid workspace access passcode."}), 401
+
+    res = jsonify({
+        "success": True,
+        "message": "Workspace successfully authenticated.",
+        "user": email
+    })
+    res.set_cookie("autobi_user", email, max_age=30 * 86400, httponly=True, samesite="Lax")
+    return res
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    res = jsonify({"success": True, "message": "Logged out of workspace."})
+    res.set_cookie("autobi_user", "", max_age=0, httponly=True, samesite="Lax")
+    return res
+
+
 @app.route("/api/upload", methods=["POST"])
+@require_auth
 def upload_file():
     if "file" not in request.files:
         return jsonify({"success": False, "error": "No file uploaded"}), 400
@@ -549,6 +625,7 @@ def inspect_file_sheets():
 
 
 @app.route("/api/sample", methods=["POST"])
+@require_auth
 def run_sample():
     # Support specifying domain preset in JSON or query param
     req_json = request.get_json(silent=True) or {}
@@ -600,10 +677,10 @@ start "" "Executive_Dashboard_Preview.html"
 echo 2. Opening Measures Cheatsheet...
 start "" "POWER_BI_MEASURES_CHEATSHEET.md"
 echo.
-echo 3. Launching Power BI Desktop...
-start "" "C:\\Program Files\\Microsoft Power BI Desktop\\bin\\PBIDesktop.exe" 2>nul || echo [Notice] Power BI Desktop was not found at standard path. Please open PBIDesktop.exe manually.
+echo 3. Launching Power BI Project directly...
+start "" "AutoBI_Project.pbip" 2>nul || start "" "C:\\Program Files\\Microsoft Power BI Desktop\\bin\\PBIDesktop.exe" "AutoBI_Project.pbip" 2>nul || echo [Notice] Power BI Desktop was not found at standard path. Please double-click 'AutoBI_Project.pbip' directly.
 echo.
-echo Done! Import 'cleaned_data.csv' or paste 'LoadData.m' into Advanced Editor.
+echo Done! All measures, tables, and column types are pre-loaded in AutoBI_Project.pbip.
 pause
 """
 
@@ -617,6 +694,11 @@ pause
         zf.writestr("Executive_Dashboard_Preview.html", session.get("dashboard_html", ""))
         zf.writestr("QuickLaunch_PowerBI.bat", quicklaunch_bat)
         zf.writestr("README.txt", session["readme"])
+
+        # Include native Power BI Project (.pbip) bundle
+        pbip_files = session.get("pbip_files", {})
+        for rel_path, file_content in pbip_files.items():
+            zf.writestr(rel_path, file_content)
 
     zip_buffer.seek(0)
     download_filename = f"powerbi_{session.get('filename', 'pack').split('.')[0]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"

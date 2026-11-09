@@ -74,7 +74,8 @@ def test_user_temp_stats_file():
     res = client.post(
         "/api/upload",
         data={"file": (io.BytesIO(file_bytes), "temp_stats.xlsx")},
-        content_type="multipart/form-data"
+        content_type="multipart/form-data",
+        headers={"X-Workspace-Key": "autobi2026"}
     )
     assert res.status_code == 200, f"Upload failed with status {res.status_code}: {res.data}"
     json_data = res.get_json()
@@ -290,8 +291,9 @@ def test_all_domain_models_and_payloads():
 def test_api_sample_all_domains():
     """Test /api/sample endpoint for all preset domains."""
     client = app.test_client()
+    headers = {"X-Workspace-Key": "autobi2026"}
     for dom in ["sales", "marketing", "hr", "inventory"]:
-        res = client.post("/api/sample", json={"domain": dom})
+        res = client.post("/api/sample", json={"domain": dom}, headers=headers)
         assert res.status_code == 200
         data = res.get_json()
         assert data["success"] is True
@@ -314,6 +316,7 @@ def test_api_sample_all_domains():
             assert "dax_measures.dax" in files
             assert "POWER_BI_MEASURES_CHEATSHEET.md" in files
             assert "audit_log.json" in files
+            assert "AutoBI_Project.pbip" in files
             assert "README.txt" in files
 
     print("[PASS] test_api_sample_all_domains")
@@ -326,7 +329,8 @@ def test_api_upload_csv_bytes():
     res = client.post(
         "/api/upload",
         data={"file": (io.BytesIO(csv_content), "messy_sales.csv")},
-        content_type="multipart/form-data"
+        content_type="multipart/form-data",
+        headers={"X-Workspace-Key": "autobi2026"}
     )
     assert res.status_code == 200
     data = res.get_json()
