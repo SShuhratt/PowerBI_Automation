@@ -62,6 +62,8 @@ def test_api_sample():
     assert "dax_measures.dax" in namelist
     assert "POWER_BI_MEASURES_CHEATSHEET.md" in namelist
     assert "audit_log.json" in namelist
+    assert "Executive_Dashboard_Preview.html" in namelist
+    assert "QuickLaunch_PowerBI.bat" in namelist
     assert "README.txt" in namelist
 
     print("[PASS] test_api_sample & test_download_zip")
@@ -159,10 +161,39 @@ def test_multi_sheet_and_encoding():
     print("[PASS] test_multi_sheet_and_encoding (Excel sheets + CP1251 Cyrillic)")
 
 
+def test_preview_and_purge():
+    """Verify live executive dashboard preview and explicit data privacy purge."""
+    client = app.test_client()
+    sample_res = client.post("/api/sample")
+    session_id = sample_res.get_json()["session_id"]
+
+    # 1. Test Executive Preview HTML endpoint
+    prev_res = client.get(f"/api/preview/{session_id}")
+    assert prev_res.status_code == 200
+    assert "text/html" in prev_res.content_type
+    assert b"AutoBI Executive Dashboard" in prev_res.data
+    assert b"chart.js" in prev_res.data.lower()
+
+    # 2. Test Explicit Purge endpoint
+    purge_res = client.post(f"/api/purge/{session_id}")
+    assert purge_res.status_code == 200
+    purge_data = purge_res.get_json()
+    assert purge_data["success"] is True
+
+    # 3. Verify session is completely gone
+    prev_again = client.get(f"/api/preview/{session_id}")
+    assert prev_again.status_code == 404
+
+    dl_again = client.get(f"/api/download/{session_id}")
+    assert dl_again.status_code == 404
+    print("[PASS] test_preview_and_purge (Executive Preview + Data Purge)")
+
+
 if __name__ == "__main__":
     test_index_route()
     test_api_sample()
     test_api_upload_csv()
     test_session_persistence()
     test_multi_sheet_and_encoding()
+    test_preview_and_purge()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

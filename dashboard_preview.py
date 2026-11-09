@@ -1,7 +1,7 @@
 """
-dashboard_preview.py - Generates an interactive executive dashboard HTML preview.
-Gives stakeholders an immediate, zero-friction visual preview of the cleaned data
-and KPIs while the Power BI model is loaded.
+dashboard_preview.py - Standalone Interactive Executive HTML Dashboard Generator
+Generates a self-contained, responsive HTML/JS dashboard that stakeholders can
+double-click and open immediately in any browser without Power BI installed.
 """
 
 import os
@@ -9,171 +9,178 @@ import json
 import pandas as pd
 
 
-def generate_html_dashboard(df: pd.DataFrame, output_path: str):
-    # Compute metrics
-    total_rev = df["total_revenue"].sum()
-    total_units = int(df["units_sold"].sum())
-    total_orders = df["order_id"].nunique()
-    aov = total_rev / total_orders if total_orders else 0
-    completed_rev = df[df["status"] == "Completed"]["total_revenue"].sum()
-    cancelled_rev = df[df["status"] == "Cancelled"]["total_revenue"].sum()
-    pending_rev = df[df["status"] == "Pending"]["total_revenue"].sum()
+def generate_html_dashboard(df: pd.DataFrame, kpis: list, charts: dict, domain_info: dict, filename: str) -> str:
+    domain_label = domain_info.get("label", "Business Analytics")
+    domain_icon = domain_info.get("icon", "📊")
 
-    # Category breakdown
-    cat_data = df.groupby("category")["total_revenue"].sum().to_dict()
-    # Region breakdown
-    reg_data = df.groupby("region")["total_revenue"].sum().to_dict()
-    # Rep breakdown
-    rep_data = df.groupby("sales_rep")["total_revenue"].sum().to_dict()
-
-    # Table rows
-    table_rows_html = ""
-    for _, row in df.iterrows():
-        status_badge = "bg-green-100 text-green-800" if row['status'] == "Completed" else ("bg-red-100 text-red-800" if row['status'] == "Cancelled" else "bg-yellow-100 text-yellow-800")
-        date_str = str(row['order_date'])[:10]
-        table_rows_html += f"""
-        <tr class="border-b hover:bg-slate-50 transition">
-            <td class="px-4 py-2 font-mono text-sm">{row['order_id']}</td>
-            <td class="px-4 py-2 text-sm">{date_str}</td>
-            <td class="px-4 py-2 text-sm font-medium">{row['region']}</td>
-            <td class="px-4 py-2 text-sm">{row['sales_rep']}</td>
-            <td class="px-4 py-2 text-sm">{row['category']}</td>
-            <td class="px-4 py-2 text-sm text-right">{row['units_sold']:.0f}</td>
-            <td class="px-4 py-2 text-sm text-right">${row['unit_price']:.2f}</td>
-            <td class="px-4 py-2 text-sm text-right font-semibold text-indigo-900">${row['total_revenue']:,.2f}</td>
-            <td class="px-4 py-2 text-sm text-center"><span class="px-2 py-0.5 rounded-full text-xs font-semibold {status_badge}">{row['status']}</span></td>
-        </tr>
+    # Format KPI cards HTML
+    kpis_html = ""
+    for k in kpis:
+        kpis_html += f"""
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition">
+            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">{k.get('label', '')}</div>
+            <div class="text-2xl font-bold text-slate-900 mb-1">{k.get('value', '')}</div>
+            <div class="text-xs text-slate-400">{k.get('sub', '')}</div>
+        </div>
         """
+
+    # Format Table records
+    table_headers_html = "".join([f'<th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">{c}</th>' for c in df.columns[:10]])
+    table_rows_html = ""
+    for _, row in df.head(50).iterrows():
+        cells = "".join([f'<td class="px-4 py-2.5 text-sm text-slate-700 whitespace-nowrap">{str(row[c]) if pd.notna(row[c]) else ""}</td>' for c in df.columns[:10]])
+        table_rows_html += f'<tr class="border-b border-slate-100 hover:bg-slate-50 transition">{cells}</tr>'
+
+    charts_json = json.dumps(charts or {}, ensure_ascii=False)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AutoBI Executive Dashboard Preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoBI Executive Dashboard — {filename}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style> body {{ font-family: 'Inter', sans-serif; }} </style>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {{ font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }}
+        .glass-card {{ background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }}
+    </style>
 </head>
-<body class="bg-slate-50 text-slate-900 p-8">
-    <div class="max-w-7xl mx-auto space-y-6">
+<body class="p-6 md:p-10 min-h-screen">
+    <div class="max-w-7xl mx-auto space-y-8">
         <!-- Header -->
-        <div class="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-slate-200">
+        <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
             <div>
-                <span class="inline-block px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-bold uppercase tracking-wider mb-2">Self-Healing Pipeline Prototype</span>
-                <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">Executive Sales Intelligence Dashboard</h1>
-                <p class="text-sm text-slate-500 mt-1">Data cleansed, validated, and modeled automatically from raw Excel input.</p>
+                <div class="flex items-center gap-3">
+                    <span class="text-3xl">{domain_icon}</span>
+                    <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">{domain_label} Executive Overview</h1>
+                </div>
+                <p class="text-slate-400 text-sm mt-1">Generated by AutoBI Studio from <span class="text-indigo-400 font-semibold">{filename}</span></p>
             </div>
-            <div class="mt-4 md:mt-0 flex gap-3">
-                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium rounded-lg">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 100% Verified Data Model
+            <div class="flex items-center gap-3">
+                <span class="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full text-xs font-semibold flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Modeled & Cleaned
                 </span>
+                <button onclick="window.print()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition">
+                    🖨️ Export PDF / Print
+                </button>
             </div>
-        </div>
+        </header>
 
-        <!-- KPI Cards -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Gross Revenue</p>
-                <p class="text-3xl font-bold text-slate-900 mt-1">${total_rev:,.2f}</p>
-                <div class="mt-2 text-xs text-emerald-600 font-medium">Auto-computed from unit * price</div>
+        <!-- KPI Grid -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <!-- Dynamic KPIs -->
+            {''.join([f'''
+            <div class="glass-card rounded-xl p-4 hover:border-indigo-500/30 transition">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">{k.get('label', '')}</div>
+                <div class="text-xl md:text-2xl font-bold text-white mb-1">{k.get('value', '')}</div>
+                <div class="text-[11px] text-slate-500">{k.get('sub', '')}</div>
             </div>
-            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Volume Sold</p>
-                <p class="text-3xl font-bold text-slate-900 mt-1">{total_units:,} <span class="text-base font-normal text-slate-400">units</span></p>
-                <div class="mt-2 text-xs text-slate-500">Across {total_orders} orders</div>
-            </div>
-            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Average Order Value (AOV)</p>
-                <p class="text-3xl font-bold text-slate-900 mt-1">${aov:,.2f}</p>
-                <div class="mt-2 text-xs text-indigo-600 font-medium">DAX: DIVIDE([Revenue], [Orders])</div>
-            </div>
-            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Completed Revenue</p>
-                <p class="text-3xl font-bold text-emerald-600 mt-1">${completed_rev:,.2f}</p>
-                <div class="mt-2 text-xs text-slate-500 font-medium">Pending: ${pending_rev:,.2f} | Cancelled: ${cancelled_rev:,.2f}</div>
-            </div>
-        </div>
+            ''' for k in kpis])}
+        </section>
 
-        <!-- Charts Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <h3 class="text-base font-bold text-slate-800 mb-4">Revenue by Category</h3>
-                <canvas id="categoryChart" height="220"></canvas>
-            </div>
-            <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <h3 class="text-base font-bold text-slate-800 mb-4">Revenue by Region</h3>
-                <canvas id="regionChart" height="220"></canvas>
-            </div>
-        </div>
-
-        <!-- Cleaned Data Table -->
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="p-5 border-b border-slate-200 flex justify-between items-center">
-                <div>
-                    <h3 class="text-base font-bold text-slate-800">Cleaned & Normalized Transaction Records</h3>
-                    <p class="text-xs text-slate-500">Summary row (#12 Total) pruned; empty revenue column computed.</p>
+        <!-- Interactive Visualizations -->
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="glass-card rounded-2xl p-6">
+                <h3 id="chart1Title" class="text-base font-bold text-slate-200 mb-4">Breakdown Analysis</h3>
+                <div class="relative h-64 md:h-80">
+                    <canvas id="chart1Canvas"></canvas>
                 </div>
             </div>
+            <div class="glass-card rounded-2xl p-6">
+                <h3 id="chart2Title" class="text-base font-bold text-slate-200 mb-4">Distribution Analysis</h3>
+                <div class="relative h-64 md:h-80">
+                    <canvas id="chart2Canvas"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Preview Table -->
+        <section class="glass-card rounded-2xl p-6 overflow-hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-slate-200">Modeled Records Preview (First 50 Rows)</h3>
+                <span class="text-xs text-slate-400 font-mono">Total Records: {len(df):,}</span>
+            </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-left">
-                    <thead class="bg-slate-50 text-slate-500 uppercase text-xs font-semibold border-b">
-                        <tr>
-                            <th class="px-4 py-3">Order ID</th>
-                            <th class="px-4 py-3">Date</th>
-                            <th class="px-4 py-3">Region</th>
-                            <th class="px-4 py-3">Sales Rep</th>
-                            <th class="px-4 py-3">Category</th>
-                            <th class="px-4 py-3 text-right">Units</th>
-                            <th class="px-4 py-3 text-right">Unit Price</th>
-                            <th class="px-4 py-3 text-right">Revenue</th>
-                            <th class="px-4 py-3 text-center">Status</th>
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-700 bg-slate-900/50">
+                            {table_headers_html}
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody class="divide-y divide-slate-800 text-sm text-slate-300 font-mono">
                         {table_rows_html}
                     </tbody>
                 </table>
             </div>
-        </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="pt-6 border-t border-slate-800 text-center text-xs text-slate-500">
+            AutoBI Engine — Power BI Ready Semantic Architecture
+        </footer>
     </div>
 
     <script>
-        // Category Chart
-        new Chart(document.getElementById('categoryChart'), {{
-            type: 'bar',
-            data: {{
-                labels: {json.dumps(list(cat_data.keys()))},
-                datasets: [{{
-                    label: 'Revenue ($)',
-                    data: {json.dumps(list(cat_data.values()))},
-                    backgroundColor: ['#6366f1', '#3b82f6', '#10b981'],
-                    borderRadius: 6
-                }}]
-            }},
-            options: {{
-                responsive: true,
-                plugins: {{ legend: {{ display: false }} }},
-                scales: {{ y: {{ beginAtZero: true }} }}
-            }}
-        }});
+        const chartData = {charts_json};
+        
+        // Render Chart 1
+        if (chartData.chart1) {{
+            document.getElementById('chart1Title').textContent = chartData.chart1.title || 'Analysis';
+            const ctx1 = document.getElementById('chart1Canvas').getContext('2d');
+            new Chart(ctx1, {{
+                type: chartData.chart1.type || 'bar',
+                data: {{
+                    labels: Object.keys(chartData.chart1.data || {{}}),
+                    datasets: [{{
+                        label: chartData.chart1.title,
+                        data: Object.values(chartData.chart1.data || {{}}),
+                        backgroundColor: chartData.chart1.type === 'doughnut' ? 
+                            ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#14b8a6'] : '#6366f1',
+                        borderRadius: 6
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{ legend: {{ labels: {{ color: '#94a3b8' }} }} }},
+                    scales: chartData.chart1.type === 'bar' ? {{
+                        x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }},
+                        y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
+                    }} : {{}}
+                }}
+            }});
+        }}
 
-        // Region Chart
-        new Chart(document.getElementById('regionChart'), {{
-            type: 'doughnut',
-            data: {{
-                labels: {json.dumps(list(reg_data.keys()))},
-                datasets: [{{
-                    data: {json.dumps(list(reg_data.values()))},
-                    backgroundColor: ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b']
-                }}]
-            }},
-            options: {{ responsive: true }}
-        }});
+        // Render Chart 2
+        if (chartData.chart2) {{
+            document.getElementById('chart2Title').textContent = chartData.chart2.title || 'Distribution';
+            const ctx2 = document.getElementById('chart2Canvas').getContext('2d');
+            new Chart(ctx2, {{
+                type: chartData.chart2.type || 'doughnut',
+                data: {{
+                    labels: Object.keys(chartData.chart2.data || {{}}),
+                    datasets: [{{
+                        label: chartData.chart2.title,
+                        data: Object.values(chartData.chart2.data || {{}}),
+                        backgroundColor: ['#06b6d4', '#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#14b8a6'],
+                        borderRadius: 6
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{ legend: {{ labels: {{ color: '#94a3b8' }} }} }},
+                    scales: chartData.chart2.type === 'bar' ? {{
+                        x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }},
+                        y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
+                    }} : {{}}
+                }}
+            }});
+        }}
     </script>
 </body>
 </html>
 """
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    return output_path
+    return html

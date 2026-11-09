@@ -19,6 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const domainSelect = document.getElementById('domainSelect');
     const sheetPickerWrap = document.getElementById('sheetPickerWrap');
     const sheetSelect = document.getElementById('sheetSelect');
+    const previewDashboardBtn = document.getElementById('previewDashboardBtn');
+    const purgeDataBtn = document.getElementById('purgeDataBtn');
+    const purgeBanner = document.getElementById('purgeBanner');
 
     // Chart Instances
     let chart1Instance = null;
@@ -109,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- API Calls ---
     function showLoading(fileName) {
+        if (purgeBanner) purgeBanner.style.display = 'none';
         uploadCard.style.display = 'none';
         loadingCard.style.display = 'block';
         resultsContainer.style.display = 'none';
@@ -227,6 +231,42 @@ document.addEventListener('DOMContentLoaded', () => {
         if (downloadZipBtn) {
             downloadZipBtn.onclick = () => {
                 window.location.href = `/api/download/${currentSessionId}`;
+            };
+        }
+
+        // Set live executive dashboard preview link
+        if (previewDashboardBtn) {
+            previewDashboardBtn.href = `/api/preview/${currentSessionId}`;
+        }
+
+        // Configure explicit Data Privacy Purge
+        if (purgeDataBtn) {
+            purgeDataBtn.onclick = async () => {
+                if (!confirm("Are you sure you want to permanently purge all data from this session? This will wipe the cleaned dataset and all artifacts from server RAM and disk.")) {
+                    return;
+                }
+                try {
+                    const purgeRes = await fetch(`/api/purge/${currentSessionId}`, { method: 'POST' });
+                    const purgeJson = await purgeRes.json();
+
+                    // Reset UI to clean state
+                    resultsContainer.style.display = 'none';
+                    uploadCard.style.display = 'block';
+                    fileInput.value = '';
+                    currentLastFile = null;
+                    currentSessionId = null;
+
+                    // Show purge confirmation
+                    if (purgeBanner) {
+                        purgeBanner.style.display = 'flex';
+                        const textEl = document.getElementById('purgeBannerText');
+                        if (textEl && purgeJson.message) {
+                            textEl.textContent = purgeJson.message;
+                        }
+                    }
+                } catch (e) {
+                    alert('Error purging data: ' + e.message);
+                }
             };
         }
 

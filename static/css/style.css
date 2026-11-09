@@ -310,6 +310,19 @@ body {
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
 }
 
+.btn-danger-outline {
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.btn-danger-outline:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
 .trust-footer {
   display: flex;
   justify-content: center;

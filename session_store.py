@@ -147,3 +147,4 @@ class SessionStore:
 
 # Singleton instance for import across application
 sessions = SessionStore()
+

@@ -97,6 +97,15 @@
 
         <!-- Results Workspace -->
         <main id="resultsContainer" class="results-container">
+            <!-- Purge Notification Banner -->
+            <div id="purgeBanner" class="alert-banner" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: var(--radius-md); padding: 14px 20px; margin-bottom: 24px; color: #6ee7b7; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span>🔒</span>
+                    <span id="purgeBannerText">Session and all uploaded data permanently purged from server memory and disk storage.</span>
+                </div>
+                <button type="button" onclick="document.getElementById('purgeBanner').style.display='none'" style="background: none; border: none; color: #6ee7b7; cursor: pointer; font-size: 18px; line-height: 1;">&times;</button>
+            </div>
+
             <!-- Action Banner -->
             <div class="action-banner">
                 <div class="banner-left">
@@ -122,9 +131,11 @@
                         </div>
                     </div>
                 </div>
-                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <button id="resetUploadBtn" class="btn btn-secondary">Upload Another</button>
+                    <a id="previewDashboardBtn" href="#" target="_blank" class="btn btn-primary" title="Open responsive executive dashboard in new browser tab">📊 Executive Preview</a>
                     <button id="downloadZipBtn" class="btn btn-emerald">📥 Download Power BI Starter Kit (.zip)</button>
+                    <button id="purgeDataBtn" class="btn btn-danger-outline" title="Permanently wipe all session data from server RAM and disk">🔒 Purge Data</button>
                 </div>
             </div>
 

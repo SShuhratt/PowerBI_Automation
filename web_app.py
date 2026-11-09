@@ -19,6 +19,7 @@ from cleaner import SelfHealingCleaner
 from pbi_model import PowerBIModelGenerator
 from domain_classifier import DomainClassifier, DOMAINS
 from session_store import sessions
+from dashboard_preview import generate_html_dashboard
 
 import numpy as np
 import math
@@ -189,17 +190,6 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
 3. AUDIT & TRACEABILITY:
    - Open 'audit_log.json' to review data healing actions.
 """
-
-    sessions.set(session_id, {
-        "created_at": datetime.now().isoformat(),
-        "cleaned_csv": cleaned_csv_str,
-        "dax_content": dax_file_content,
-        "m_script": m_script,
-        "cheatsheet": cheatsheet_content,
-        "audit_log": cleaner.audit_log,
-        "readme": readme_content,
-        "filename": filename,
-    })
 
     # 6. Compute Domain-Specific KPIs
     cols = list(df.columns)
@@ -452,6 +442,22 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
 
     records = preview_df.fillna("").to_dict(orient="records")
 
+    # 8. Generate standalone Executive HTML dashboard
+    dashboard_html = generate_html_dashboard(df, kpis, charts, domain_info, filename)
+
+    # Persist session with artifacts and dashboard preview
+    sessions.set(session_id, {
+        "created_at": datetime.now().isoformat(),
+        "cleaned_csv": cleaned_csv_str,
+        "dax_content": dax_file_content,
+        "m_script": m_script,
+        "cheatsheet": cheatsheet_content,
+        "audit_log": cleaner.audit_log,
+        "readme": readme_content,
+        "filename": filename,
+        "dashboard_html": dashboard_html,
+    })
+
     payload = {
         "success": True,
         "session_id": session_id,
@@ -559,11 +565,47 @@ def run_sample():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/preview/<session_id>")
+def preview_dashboard(session_id: str):
+    """Serve standalone interactive HTML executive dashboard."""
+    session = sessions.get(session_id)
+    if not session or not session.get("dashboard_html"):
+        return jsonify({"error": "Session expired or preview unavailable. Please re-run analysis."}), 404
+    return session["dashboard_html"], 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/api/purge/<session_id>", methods=["POST", "DELETE"])
+def purge_session(session_id: str):
+    """Explicit data privacy purge: permanently wipes session from server RAM and disk."""
+    success = sessions.delete(session_id)
+    return jsonify({
+        "success": success,
+        "message": "Session and all associated data permanently purged from server memory and disk storage."
+    })
+
+
 @app.route("/api/download/<session_id>")
 def download_pack(session_id: str):
     session = sessions.get(session_id)
     if not session:
         return jsonify({"error": "Session expired or invalid. Please re-run the analysis."}), 404
+
+    quicklaunch_bat = """@echo off
+echo ===============================================================================
+echo AutoBI - Quick Launch Power BI Starter Kit
+echo ===============================================================================
+echo.
+echo 1. Opening Offline Executive Dashboard Preview in browser...
+start "" "Executive_Dashboard_Preview.html"
+echo 2. Opening Measures Cheatsheet...
+start "" "POWER_BI_MEASURES_CHEATSHEET.md"
+echo.
+echo 3. Launching Power BI Desktop...
+start "" "C:\\Program Files\\Microsoft Power BI Desktop\\bin\\PBIDesktop.exe" 2>nul || echo [Notice] Power BI Desktop was not found at standard path. Please open PBIDesktop.exe manually.
+echo.
+echo Done! Import 'cleaned_data.csv' or paste 'LoadData.m' into Advanced Editor.
+pause
+"""
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -572,6 +614,8 @@ def download_pack(session_id: str):
         zf.writestr("dax_measures.dax", session["dax_content"])
         zf.writestr("POWER_BI_MEASURES_CHEATSHEET.md", session["cheatsheet"])
         zf.writestr("audit_log.json", json.dumps(session["audit_log"], indent=2, default=str))
+        zf.writestr("Executive_Dashboard_Preview.html", session.get("dashboard_html", ""))
+        zf.writestr("QuickLaunch_PowerBI.bat", quicklaunch_bat)
         zf.writestr("README.txt", session["readme"])
 
     zip_buffer.seek(0)
