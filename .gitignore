@@ -22,4 +22,10 @@ Thumbs.db
 .ssh/
 *.pub
 oracle_vps*
+.env*
+*.env
+coolctl_config.json
+coolify_commands.md
+
+
 
