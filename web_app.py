@@ -18,6 +18,7 @@ from flask import Flask, request, jsonify, render_template, send_file
 from cleaner import SelfHealingCleaner
 from pbi_model import PowerBIModelGenerator
 from domain_classifier import DomainClassifier, DOMAINS
+from session_store import sessions
 
 import numpy as np
 import math
@@ -57,18 +58,13 @@ def sanitize_for_json(obj):
     return obj
 
 
-# In-memory session artifact cache: session_id -> { artifacts, created_at }
-SESSIONS = {}
-
+# Multi-worker persistent session storage via session_store (Redis / SQLite WAL)
 SAMPLE_FILE_PATH = r"D:\Documents\power_bi_test_sample.xlsx"
 
 
 def prune_old_sessions():
-    """Remove sessions older than 2 hours to maintain minimal memory footprint."""
-    now = datetime.now()
-    expired = [sid for sid, data in SESSIONS.items() if now - data["created_at"] > timedelta(hours=2)]
-    for sid in expired:
-        SESSIONS.pop(sid, None)
+    """Trigger periodic cleanup of expired sessions."""
+    sessions.prune()
 
 
 def generate_synthetic_demo_df(domain: str) -> pd.DataFrame:
@@ -194,8 +190,8 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
    - Open 'audit_log.json' to review data healing actions.
 """
 
-    SESSIONS[session_id] = {
-        "created_at": datetime.now(),
+    sessions.set(session_id, {
+        "created_at": datetime.now().isoformat(),
         "cleaned_csv": cleaned_csv_str,
         "dax_content": dax_file_content,
         "m_script": m_script,
@@ -203,7 +199,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "audit_log": cleaner.audit_log,
         "readme": readme_content,
         "filename": filename,
-    }
+    })
 
     # 6. Compute Domain-Specific KPIs
     cols = list(df.columns)
@@ -477,6 +473,10 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "audit_log": cleaner.audit_log,
         "dax_measures": measures,
         "power_query_m": m_script,
+        "sheet_info": {
+            "selected_sheet": getattr(cleaner, "sheet_name", None),
+            "available_sheets": getattr(cleaner, "available_sheets", []),
+        },
         "table_columns": list(df.columns),
         "table_records": records,
     }
@@ -498,6 +498,7 @@ def upload_file():
         return jsonify({"success": False, "error": "Empty filename"}), 400
 
     domain_override = request.form.get("domain") or None
+    sheet_override = request.form.get("sheet") or None
 
     filename = file.filename
     lower_ext = os.path.splitext(filename)[1].lower()
@@ -508,13 +509,36 @@ def upload_file():
         file_bytes = file.read()
         file_buffer = io.BytesIO(file_bytes)
 
-        cleaner = SelfHealingCleaner(file_buffer, filename=filename)
+        cleaner = SelfHealingCleaner(file_buffer, filename=filename, sheet_name=sheet_override)
         df_clean = cleaner.clean()
         result = build_analysis_payload(cleaner, df_clean, filename, domain_override=domain_override)
         return jsonify(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/sheets", methods=["POST"])
+def inspect_file_sheets():
+    """Returns sheet names in an Excel file so users can choose which tab to analyze."""
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "No file uploaded"}), 400
+    file = request.files["file"]
+    if not file.filename:
+        return jsonify({"success": False, "error": "Empty filename"}), 400
+
+    filename = file.filename
+    try:
+        file_bytes = file.read()
+        sheets = SelfHealingCleaner.inspect_sheets(io.BytesIO(file_bytes), filename=filename)
+        return jsonify({
+            "success": True,
+            "filename": filename,
+            "sheets": sheets,
+            "has_multiple": len(sheets) > 1
+        })
+    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -537,7 +561,7 @@ def run_sample():
 
 @app.route("/api/download/<session_id>")
 def download_pack(session_id: str):
-    session = SESSIONS.get(session_id)
+    session = sessions.get(session_id)
     if not session:
         return jsonify({"error": "Session expired or invalid. Please re-run the analysis."}), 404
 

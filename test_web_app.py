@@ -93,8 +93,76 @@ Total,15,35,,
     print("[PASS] test_api_upload_csv")
 
 
+def test_session_persistence():
+    """Verify that sessions persist in SQLite WAL across different connection/worker instances."""
+    from session_store import sessions
+    test_id = "test-sid-uuid-42"
+    test_payload = {"filename": "sales.xlsx", "cleaned_csv": "col1,col2\n1,2", "m_script": "let", "dax_content": "Total = 1", "cheatsheet": "# Cheatsheet", "audit_log": {}, "readme": "Hello"}
+    
+    assert sessions.set(test_id, test_payload) is True
+    retrieved = sessions.get(test_id)
+    assert retrieved is not None
+    assert retrieved["filename"] == "sales.xlsx"
+    assert retrieved["cleaned_csv"] == "col1,col2\n1,2"
+    
+    # Test client download route using the persisted session
+    client = app.test_client()
+    dl_res = client.get(f"/api/download/{test_id}")
+    assert dl_res.status_code == 200
+    assert dl_res.mimetype == "application/zip"
+    
+    # Clean up
+    sessions.delete(test_id)
+    assert sessions.get(test_id) is None
+    print("[PASS] test_session_persistence across workers")
+
+
+def test_multi_sheet_and_encoding():
+    """Verify multi-sheet Excel extraction and CP1251 Cyrillic CSV parsing."""
+    import pandas as pd
+    client = app.test_client()
+
+    # 1. Multi-Sheet Excel
+    excel_buf = io.BytesIO()
+    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+        pd.DataFrame([{"notes": "This is cover notes"}]).to_excel(writer, sheet_name="Cover", index=False)
+        pd.DataFrame([
+            {"order_id": 101, "units_sold": 5, "unit_price": 50.0, "total_revenue": None},
+            {"order_id": 102, "units_sold": 2, "unit_price": 100.0, "total_revenue": None},
+            {"order_id": "Total", "units_sold": 7, "unit_price": 150.0, "total_revenue": None}
+        ]).to_excel(writer, sheet_name="Sales_Data", index=False)
+    excel_buf.seek(0)
+
+    # Test /api/sheets inspection
+    sheets_res = client.post("/api/sheets", data={'file': (io.BytesIO(excel_buf.getvalue()), 'multi.xlsx')}, content_type='multipart/form-data')
+    assert sheets_res.status_code == 200
+    s_data = sheets_res.get_json()
+    assert s_data["has_multiple"] is True
+    assert "Sales_Data" in s_data["sheets"]
+
+    # Test smart selection (should auto-pick Sales_Data because it has the most rows/cells)
+    excel_buf.seek(0)
+    upload_res = client.post("/api/upload", data={'file': (excel_buf, 'multi.xlsx')}, content_type='multipart/form-data')
+    assert upload_res.status_code == 200
+    u_data = upload_res.get_json()
+    assert u_data["sheet_info"]["selected_sheet"] == "Sales_Data"
+    assert u_data["audit_log"]["cleaned_row_count"] == 2
+
+    # 2. Cyrillic Windows-1251 / CP1251 CSV
+    cyrillic_csv = "Товар;Количество;Цена;Итого\nНоутбук;2;1200;\nМышь;5;25;\nИтого;7;1225;\n"
+    cyrillic_bytes = cyrillic_csv.encode("cp1251")
+    c_res = client.post("/api/upload", data={'file': (io.BytesIO(cyrillic_bytes), 'report_1c.csv')}, content_type='multipart/form-data')
+    assert c_res.status_code == 200
+    c_data = c_res.get_json()
+    assert c_data["audit_log"]["cleaned_row_count"] == 2
+    assert len(c_data["audit_log"]["dropped_rows"]) == 1
+    print("[PASS] test_multi_sheet_and_encoding (Excel sheets + CP1251 Cyrillic)")
+
+
 if __name__ == "__main__":
     test_index_route()
     test_api_sample()
     test_api_upload_csv()
+    test_session_persistence()
+    test_multi_sheet_and_encoding()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

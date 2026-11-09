@@ -12,19 +12,90 @@ from datetime import datetime
 
 
 class SelfHealingCleaner:
-    def __init__(self, file_input, filename: str = None):
+    def __init__(self, file_input, filename: str = None, sheet_name: str = None):
         self.file_input = file_input
         self.filename = filename or (file_input if isinstance(file_input, str) else "uploaded_file.xlsx")
+        self.sheet_name = sheet_name
+        self.available_sheets = []
         self.audit_log = {
             "source_file": self.filename,
             "timestamp": datetime.now().isoformat(),
             "raw_row_count": 0,
             "cleaned_row_count": 0,
+            "selected_sheet": self.sheet_name,
+            "available_sheets": [],
             "dropped_rows": [],
             "inferred_calculations": [],
             "renamed_columns": {},
             "datatype_conversions": {},
         }
+
+    @staticmethod
+    def inspect_sheets(file_input, filename: str = None) -> list:
+        """Inspect sheet names in an Excel file without full table loading."""
+        lower = (filename or (file_input if isinstance(file_input, str) else "")).lower()
+        if lower.endswith(".csv"):
+            return []
+        try:
+            import openpyxl
+            if isinstance(file_input, (str, os.PathLike)):
+                wb = openpyxl.load_workbook(file_input, read_only=True)
+                return wb.sheetnames
+            else:
+                # Buffer
+                pos = file_input.tell() if hasattr(file_input, "tell") else 0
+                wb = openpyxl.load_workbook(file_input, read_only=True)
+                sheets = wb.sheetnames
+                if hasattr(file_input, "seek"):
+                    file_input.seek(pos)
+                return sheets
+        except Exception:
+            return []
+
+    def _load_csv_with_fallback(self, file_source) -> pd.DataFrame:
+        """Robust CSV loader supporting UTF-8-BOM, CP1251 (1C accounting), semicolon delimiters."""
+        encodings = ["utf-8-sig", "utf-8", "cp1251", "windows-1251", "latin1"]
+        for enc in encodings:
+            try:
+                if hasattr(file_source, "seek"):
+                    file_source.seek(0)
+                # Try with automatic separator detection (comma vs semicolon)
+                return pd.read_csv(file_source, encoding=enc, sep=None, engine="python")
+            except Exception:
+                continue
+        # Final fallback
+        if hasattr(file_source, "seek"):
+            file_source.seek(0)
+        return pd.read_csv(file_source, encoding="utf-8", errors="replace")
+
+    def _load_excel_smart(self, file_source, sheet_name=None) -> tuple:
+        """Load Excel workbook with sheet detection."""
+        if hasattr(file_source, "seek"):
+            file_source.seek(0)
+        excel_file = pd.ExcelFile(file_source)
+        sheets = excel_file.sheet_names
+        chosen_sheet = sheet_name
+
+        if not chosen_sheet:
+            # If multiple sheets, pick the sheet with most non-empty rows
+            if len(sheets) == 1:
+                chosen_sheet = sheets[0]
+            else:
+                best_sheet = sheets[0]
+                max_cells = -1
+                for s in sheets:
+                    try:
+                        sample_df = excel_file.parse(s, nrows=20)
+                        cell_count = sample_df.notna().sum().sum()
+                        if cell_count > max_cells:
+                            max_cells = cell_count
+                            best_sheet = s
+                    except Exception:
+                        continue
+                chosen_sheet = best_sheet
+
+        df = excel_file.parse(chosen_sheet)
+        return df, chosen_sheet, sheets
 
     def _clean_column_name(self, col) -> str:
         """Standardize column names for clean DAX / Power Query use."""
@@ -58,15 +129,23 @@ class SelfHealingCleaner:
                 raise FileNotFoundError(f"Input file not found: {self.file_input}")
             lower_name = self.file_input.lower()
             if lower_name.endswith(".csv"):
-                df = pd.read_csv(self.file_input)
+                df = self._load_csv_with_fallback(self.file_input)
             else:
-                df = pd.read_excel(self.file_input)
+                df, chosen_sheet, all_sheets = self._load_excel_smart(self.file_input, self.sheet_name)
+                self.available_sheets = all_sheets
+                self.sheet_name = chosen_sheet
+                self.audit_log["selected_sheet"] = chosen_sheet
+                self.audit_log["available_sheets"] = all_sheets
         else:
             lower_name = self.filename.lower()
             if lower_name.endswith(".csv"):
-                df = pd.read_csv(self.file_input)
+                df = self._load_csv_with_fallback(self.file_input)
             else:
-                df = pd.read_excel(self.file_input)
+                df, chosen_sheet, all_sheets = self._load_excel_smart(self.file_input, self.sheet_name)
+                self.available_sheets = all_sheets
+                self.sheet_name = chosen_sheet
+                self.audit_log["selected_sheet"] = chosen_sheet
+                self.audit_log["available_sheets"] = all_sheets
 
         self.audit_log["raw_row_count"] = len(df)
 
@@ -96,8 +175,13 @@ class SelfHealingCleaner:
             row_str = " ".join([str(val).lower() for val in row.values if pd.notna(val)])
             nan_ratio = row.isna().mean()
             first_val = str(row.iloc[0]).lower().strip() if len(row) > 0 and pd.notna(row.iloc[0]) else ""
-            has_summary_keyword = any(k in row_str for k in ["total", "subtotal", "average", "summary", "grand total"])
-            is_summary = has_summary_keyword and (nan_ratio >= 0.25 or any(k == first_val for k in ["total", "subtotal", "sum", "average", "grand total"]))
+            summary_terms = [
+                "total", "subtotal", "average", "summary", "grand total", "sum",
+                "итого", "всего", "среднее", "общий итог", "сумма",
+                "jami", "barchasi", "umumiy"
+            ]
+            has_summary_keyword = any(k in row_str for k in summary_terms)
+            is_summary = has_summary_keyword and (nan_ratio >= 0.25 or any(k == first_val for k in summary_terms))
             all_nan = row.isna().all()
 
             if is_summary or all_nan:

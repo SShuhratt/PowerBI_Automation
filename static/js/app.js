@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeFileBadge = document.getElementById('activeFileBadge');
     const domainBadge = document.getElementById('domainBadge');
     const domainSelect = document.getElementById('domainSelect');
+    const sheetPickerWrap = document.getElementById('sheetPickerWrap');
+    const sheetSelect = document.getElementById('sheetSelect');
 
     // Chart Instances
     let chart1Instance = null;
@@ -117,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingCard.style.display = 'none';
     }
 
-    async function handleFileUpload(file, domainOverride = null) {
+    async function handleFileUpload(file, domainOverride = null, sheetOverride = null) {
         const ext = file.name.split('.').pop().toLowerCase();
         if (!['xlsx', 'xls', 'csv'].includes(ext)) {
             alert(`Unsupported file type: .${ext}. Please upload an Excel (.xlsx, .xls) or CSV file.`);
@@ -129,6 +131,9 @@ document.addEventListener('DOMContentLoaded', () => {
         formData.append('file', file);
         if (domainOverride) {
             formData.append('domain', domainOverride);
+        }
+        if (sheetOverride) {
+            formData.append('sheet', sheetOverride);
         }
 
         try {
@@ -189,6 +194,33 @@ document.addEventListener('DOMContentLoaded', () => {
             if (domainSelect) {
                 domainSelect.value = dom.key;
             }
+        }
+
+        // Multi-Sheet Tab Picker
+        if (sheetPickerWrap && sheetSelect && data.sheet_info) {
+            const sheets = data.sheet_info.available_sheets || [];
+            if (sheets.length > 1) {
+                sheetSelect.innerHTML = '';
+                sheets.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s;
+                    opt.textContent = `📑 ${s}`;
+                    if (s === data.sheet_info.selected_sheet) {
+                        opt.selected = true;
+                    }
+                    sheetSelect.appendChild(opt);
+                });
+                sheetPickerWrap.style.display = 'flex';
+                sheetSelect.onchange = () => {
+                    if (currentLastFile) {
+                        handleFileUpload(currentLastFile, domainSelect ? domainSelect.value : null, sheetSelect.value);
+                    }
+                };
+            } else {
+                sheetPickerWrap.style.display = 'none';
+            }
+        } else if (sheetPickerWrap) {
+            sheetPickerWrap.style.display = 'none';
         }
 
         // Set download link
