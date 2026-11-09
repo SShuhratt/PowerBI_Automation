@@ -17,3 +17,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# SSH & Secrets
+.ssh/
+*.pub
+oracle_vps*
+
