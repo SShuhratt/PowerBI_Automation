@@ -530,6 +530,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "pbip_files": pbip_files,
         "is_live_url": is_live_url,
         "source_url": source_csv_path if is_live_url else None,
+        "kpis": kpis,
     })
 
     payload = {
@@ -723,6 +724,46 @@ def preview_dashboard(session_id: str):
     if not session or not session.get("dashboard_html"):
         return jsonify({"error": "Session expired or preview unavailable. Please re-run analysis."}), 404
     return session["dashboard_html"], 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/api/telegram/config", methods=["GET"])
+@require_auth
+def telegram_config():
+    """Returns whether Telegram Bot credentials are configured."""
+    from telegram_client import get_default_telegram_config
+    token, chat_id = get_default_telegram_config()
+    return jsonify({
+        "configured": bool(token and chat_id),
+        "has_token": bool(token),
+        "chat_id_configured": bool(chat_id),
+        "default_chat_id": (chat_id[:4] + "..." + chat_id[-4:]) if chat_id and len(chat_id) > 8 else chat_id
+    })
+
+
+@app.route("/api/telegram/dispatch", methods=["POST"])
+@require_auth
+def telegram_dispatch():
+    """Dispatch executive digest and interactive HTML report directly to Telegram."""
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        return jsonify({"error": "Missing session_id."}), 400
+
+    session_data = sessions.get(session_id)
+    if not session_data:
+        return jsonify({"error": "Session expired or invalid. Please re-run analysis."}), 404
+
+    chat_id = data.get("chat_id")
+    bot_token = data.get("bot_token")
+
+    try:
+        from telegram_client import dispatch_executive_report
+        result = dispatch_executive_report(session_data, chat_id=chat_id, bot_token=bot_token)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Telegram dispatch failed: {str(e)}"}), 502
 
 
 @app.route("/api/purge/<session_id>", methods=["POST", "DELETE"])

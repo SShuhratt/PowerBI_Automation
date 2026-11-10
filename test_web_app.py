@@ -5,6 +5,7 @@ test_web_app.py - Automated test suite for AutoBI Web Portal backend endpoints.
 import io
 import json
 import zipfile
+from unittest.mock import patch
 from web_app import app
 
 
@@ -497,6 +498,85 @@ def test_pareto_abc_segmentation():
     print("[PASS] test_pareto_abc_segmentation (Pareto 80/20 logic, abc_class column, and Class A Share % DAX)")
 
 
+def test_telegram_executive_dispatcher():
+    """Verify Telegram config and dispatch endpoints, message builder, and document attachment."""
+    client = app.test_client()
+
+    # 1. Unauthenticated request rejected
+    unauth_res = client.get("/api/telegram/config")
+    assert unauth_res.status_code == 401
+
+    # 2. Authenticated config check
+    config_res = client.get("/api/telegram/config", headers=AUTH_HEADERS)
+    assert config_res.status_code == 200
+    cfg = config_res.get_json()
+    assert "configured" in cfg
+    assert "has_token" in cfg
+    assert "chat_id_configured" in cfg
+
+    # 3. Validation: missing session_id
+    bad_req = client.post("/api/telegram/dispatch", json={}, headers=AUTH_HEADERS)
+    assert bad_req.status_code == 400
+    assert "Missing session_id" in bad_req.get_json()["error"]
+
+    # 4. Validation: invalid session_id
+    not_found = client.post("/api/telegram/dispatch", json={"session_id": "nonexistent_session_123"}, headers=AUTH_HEADERS)
+    assert not_found.status_code == 404
+
+    # 5. Validation: missing bot token and chat id when environment is empty
+    sample_res = client.post("/api/sample", headers=AUTH_HEADERS)
+    assert sample_res.status_code == 200
+    session_id = sample_res.get_json()["session_id"]
+
+    with patch.dict("os.environ", {}, clear=True):
+        no_creds = client.post(
+            "/api/telegram/dispatch",
+            json={"session_id": session_id},
+            headers=AUTH_HEADERS
+        )
+        assert no_creds.status_code == 400
+        assert "Telegram Bot Token is required" in no_creds.get_json()["error"]
+
+    # 6. Successful dispatch with mocked Telegram API
+    mock_msg_resp = {"ok": True, "result": {"message_id": 9901}}
+    mock_doc_resp = {"ok": True, "result": {"message_id": 9902}}
+
+    with patch("telegram_client.send_telegram_message", return_value=mock_msg_resp) as mock_msg, \
+         patch("telegram_client.send_telegram_document", return_value=mock_doc_resp) as mock_doc:
+
+        dispatch_res = client.post(
+            "/api/telegram/dispatch",
+            json={
+                "session_id": session_id,
+                "chat_id": "@board_directors",
+                "bot_token": "123456789:ABCDEF_TEST_TOKEN"
+            },
+            headers=AUTH_HEADERS
+        )
+        assert dispatch_res.status_code == 200
+        disp_data = dispatch_res.get_json()
+        assert disp_data["success"] is True
+        assert disp_data["message_id"] == 9901
+        assert disp_data["document_id"] == 9902
+
+        # Verify mock calls
+        assert mock_msg.called
+        msg_text = mock_msg.call_args[0][0]
+        assert "AutoBI Executive Digest" in msg_text
+        assert "Executive Key Performance Indicators" in msg_text
+        assert mock_msg.call_args[0][1] == "@board_directors"
+        assert mock_msg.call_args[0][2] == "123456789:ABCDEF_TEST_TOKEN"
+
+        assert mock_doc.called
+        doc_bytes = mock_doc.call_args[0][0]
+        assert b"<!DOCTYPE html>" in doc_bytes or len(doc_bytes) > 100
+        assert mock_doc.call_args[1]["filename"].startswith("Executive_Dashboard_")
+        assert mock_doc.call_args[1]["filename"].endswith(".html")
+        assert mock_doc.call_args[1]["chat_id"] == "@board_directors"
+
+    print("[PASS] test_telegram_executive_dispatcher (Config, validation, digest HTML formatting, and document dispatch)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -511,4 +591,5 @@ if __name__ == "__main__":
     test_cfo_anomaly_detection_engine()
     test_cbu_fx_normalization()
     test_pareto_abc_segmentation()
+    test_telegram_executive_dispatcher()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

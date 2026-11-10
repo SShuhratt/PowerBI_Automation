@@ -35,6 +35,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const gsheetsSection = document.getElementById('gsheetsSection');
     const gsheetsForm = document.getElementById('gsheetsForm');
     const gsheetsUrlInput = document.getElementById('gsheetsUrlInput');
+    const sendTelegramBtn = document.getElementById('sendTelegramBtn');
+    const telegramModal = document.getElementById('telegramModal');
+    const closeTelegramModalBtn = document.getElementById('closeTelegramModalBtn');
+    const telegramDispatchForm = document.getElementById('telegramDispatchForm');
+    const telegramChatIdInput = document.getElementById('telegramChatIdInput');
+    const telegramBotTokenInput = document.getElementById('telegramBotTokenInput');
+    const telegramStatusMsg = document.getElementById('telegramStatusMsg');
+    const telegramConfigStatus = document.getElementById('telegramConfigStatus');
+    const telegramSubmitBtn = document.getElementById('telegramSubmitBtn');
 
     // Check workspace authentication status
     async function checkAuthStatus() {
@@ -107,6 +116,146 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Call on load
     checkAuthStatus();
+
+    // --- Telegram Executive Digest Dispatcher ---
+    if (sendTelegramBtn) {
+        sendTelegramBtn.addEventListener('click', async () => {
+            if (!currentSessionId) {
+                alert('Please upload or analyze a dataset first before sending report to Telegram.');
+                return;
+            }
+
+            // Reset status and inputs
+            if (telegramStatusMsg) {
+                telegramStatusMsg.style.display = 'none';
+                telegramStatusMsg.textContent = '';
+            }
+
+            // Fetch server Telegram Bot configuration status
+            try {
+                const configRes = await fetch('/api/telegram/config');
+                const configData = await configRes.json();
+                if (telegramConfigStatus) {
+                    if (configData.configured) {
+                        telegramConfigStatus.style.background = 'rgba(16, 185, 129, 0.15)';
+                        telegramConfigStatus.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+                        telegramConfigStatus.style.color = '#6ee7b7';
+                        telegramConfigStatus.innerHTML = `<span>✓ Server bot token active. Default chat ID configured (${configData.default_chat_id}).</span>`;
+                        if (telegramChatIdInput) {
+                            telegramChatIdInput.placeholder = "Pre-configured in server (leave blank to use default)";
+                            telegramChatIdInput.required = false;
+                        }
+                    } else if (configData.has_token) {
+                        telegramConfigStatus.style.background = 'rgba(6, 182, 212, 0.15)';
+                        telegramConfigStatus.style.border = '1px solid rgba(6, 182, 212, 0.3)';
+                        telegramConfigStatus.style.color = '#67e8f9';
+                        telegramConfigStatus.innerHTML = `<span>✓ Server bot token active. Please enter target Chat ID or Channel username below.</span>`;
+                        if (telegramChatIdInput) telegramChatIdInput.required = true;
+                    } else {
+                        telegramConfigStatus.style.background = 'rgba(245, 158, 11, 0.15)';
+                        telegramConfigStatus.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+                        telegramConfigStatus.style.color = '#fcd34d';
+                        telegramConfigStatus.innerHTML = `<span>⚠️ No server credentials set. Please provide both Chat ID and Bot Token below.</span>`;
+                        if (telegramChatIdInput) telegramChatIdInput.required = true;
+                    }
+                }
+            } catch (err) {
+                console.warn('Unable to query Telegram config:', err);
+            }
+
+            if (telegramModal) telegramModal.style.display = 'flex';
+        });
+    }
+
+    if (closeTelegramModalBtn && telegramModal) {
+        closeTelegramModalBtn.addEventListener('click', () => {
+            telegramModal.style.display = 'none';
+        });
+    }
+
+    if (telegramModal) {
+        telegramModal.addEventListener('click', (e) => {
+            if (e.target === telegramModal) {
+                telegramModal.style.display = 'none';
+            }
+        });
+    }
+
+    if (telegramDispatchForm) {
+        telegramDispatchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentSessionId) {
+                alert('Session expired. Please re-run analysis.');
+                return;
+            }
+
+            if (telegramSubmitBtn) {
+                telegramSubmitBtn.disabled = true;
+                telegramSubmitBtn.textContent = '✈️ Dispatching...';
+            }
+            if (telegramStatusMsg) {
+                telegramStatusMsg.style.display = 'none';
+                telegramStatusMsg.textContent = '';
+            }
+
+            try {
+                const chatIdVal = telegramChatIdInput ? telegramChatIdInput.value.trim() : '';
+                const botTokenVal = telegramBotTokenInput ? telegramBotTokenInput.value.trim() : '';
+
+                const res = await fetch('/api/telegram/dispatch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        chat_id: chatIdVal || undefined,
+                        bot_token: botTokenVal || undefined
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    if (telegramStatusMsg) {
+                        telegramStatusMsg.style.display = 'block';
+                        telegramStatusMsg.style.background = 'rgba(16, 185, 129, 0.15)';
+                        telegramStatusMsg.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                        telegramStatusMsg.style.color = '#6ee7b7';
+                        telegramStatusMsg.innerHTML = `<b>✓ Dispatched successfully!</b> Sent executive digest and HTML dashboard to Telegram (Msg ID #${data.message_id || 'OK'}).`;
+                    }
+                    setTimeout(() => {
+                        if (telegramModal) telegramModal.style.display = 'none';
+                        if (telegramSubmitBtn) {
+                            telegramSubmitBtn.disabled = false;
+                            telegramSubmitBtn.textContent = '✈️ Send Report';
+                        }
+                    }, 1800);
+                } else {
+                    if (telegramStatusMsg) {
+                        telegramStatusMsg.style.display = 'block';
+                        telegramStatusMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+                        telegramStatusMsg.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                        telegramStatusMsg.style.color = '#fca5a5';
+                        telegramStatusMsg.textContent = data.error || 'Failed to dispatch report to Telegram.';
+                    }
+                    if (telegramSubmitBtn) {
+                        telegramSubmitBtn.disabled = false;
+                        telegramSubmitBtn.textContent = '✈️ Send Report';
+                    }
+                }
+            } catch (err) {
+                if (telegramStatusMsg) {
+                    telegramStatusMsg.style.display = 'block';
+                    telegramStatusMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+                    telegramStatusMsg.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                    telegramStatusMsg.style.color = '#fca5a5';
+                    telegramStatusMsg.textContent = 'Network error: ' + err.message;
+                }
+                if (telegramSubmitBtn) {
+                    telegramSubmitBtn.disabled = false;
+                    telegramSubmitBtn.textContent = '✈️ Send Report';
+                }
+            }
+        });
+    }
 
     // Chart Instances
     let chart1Instance = null;

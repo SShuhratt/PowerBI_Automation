@@ -185,6 +185,7 @@
                     <button id="resetUploadBtn" class="btn btn-secondary">Upload Another</button>
                     <a id="previewDashboardBtn" href="#" target="_blank" class="btn btn-primary" title="Open responsive executive dashboard in new browser tab">📊 Executive Preview</a>
                     <button id="downloadZipBtn" class="btn btn-emerald">📥 Download Power BI Starter Kit (.zip)</button>
+                    <button id="sendTelegramBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;" title="Dispatch executive digest and dashboard to Telegram">✈️ Send to Telegram</button>
                     <button id="purgeDataBtn" class="btn btn-danger-outline" title="Permanently wipe all session data from server RAM and disk">🔒 Purge Data</button>
                 </div>
             </div>
@@ -308,6 +309,42 @@
                 </form>
                 <div class="auth-footer">
                     🔒 Protected by isolated multi-worker session security & TLS encryption.
+                </div>
+            </div>
+        </div>
+
+        <!-- Telegram Executive Digest Modal Overlay -->
+        <div id="telegramModal" class="auth-modal-overlay" style="display: none;">
+            <div class="auth-modal-card" style="max-width: 480px;">
+                <div class="auth-modal-header">
+                    <div style="font-size: 32px; margin-bottom: 8px;">✈️</div>
+                    <h3>Telegram Executive Digest</h3>
+                    <p>Dispatch high-priority executive KPI summary and interactive HTML dashboard directly to Telegram.</p>
+                </div>
+                <div id="telegramConfigStatus" style="margin-bottom: 16px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; display: flex; align-items: center; gap: 8px;">
+                    <!-- Populated dynamically via /api/telegram/config -->
+                </div>
+                <form id="telegramDispatchForm" class="auth-form">
+                    <div class="auth-field">
+                        <label for="telegramChatIdInput">Telegram Chat ID / Channel</label>
+                        <input type="text" id="telegramChatIdInput" placeholder="@executive_channel or -100123456789" required>
+                        <span class="auth-hint">Channel username (e.g. <code>@board_reports</code>) or numeric user/group ID.</span>
+                    </div>
+                    <div class="auth-field">
+                        <label for="telegramBotTokenInput">Bot Token (Optional)</label>
+                        <input type="password" id="telegramBotTokenInput" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+                        <span class="auth-hint">Leave blank to use server environment <code>TELEGRAM_BOT_TOKEN</code>.</span>
+                    </div>
+                    <div id="telegramStatusMsg" class="auth-error-msg" style="display: none;"></div>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <button type="button" id="closeTelegramModalBtn" class="btn btn-secondary" style="flex: 1; padding: 11px;">Cancel</button>
+                        <button type="submit" id="telegramSubmitBtn" class="btn btn-primary" style="flex: 2; padding: 11px; background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;">
+                            ✈️ Send Report
+                        </button>
+                    </div>
+                </form>
+                <div class="auth-footer" style="margin-top: 16px;">
+                    📎 Includes interactive HTML dashboard attachment readable on iOS, Android & desktop without Power BI.
                 </div>
             </div>
         </div>
