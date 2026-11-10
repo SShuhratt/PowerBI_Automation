@@ -40,7 +40,8 @@ def generate_pbip_artifacts(
     measures: List[Dict[str, str]],
     m_script: str,
     project_name: str = "AutoBI_Project",
-    anomalies: List[Dict[str, Any]] = None
+    anomalies: List[Dict[str, Any]] = None,
+    fx_info: Dict[str, Any] = None
 ) -> Dict[str, str]:
     """
     Generates file contents for the complete Power BI Project (.pbip) directory tree.
@@ -295,6 +296,38 @@ def generate_pbip_artifacts(
             ]
         }
         tables.append(audit_table)
+
+    # Add Currency_Selector disconnected parameter table if multi-currency normalization occurred
+    if fx_info and fx_info.get("is_multi_currency"):
+        currency_selector_table = {
+            "name": "Currency_Selector",
+            "columns": [
+                {"name": "Currency", "dataType": "string", "sourceColumn": "Currency", "isKey": True},
+                {"name": "Symbol", "dataType": "string", "sourceColumn": "Symbol"}
+            ],
+            "partitions": [
+                {
+                    "name": "Currency_Selector_Partition",
+                    "mode": "import",
+                    "source": {
+                        "type": "m",
+                        "expression": [
+                            "let\n",
+                            "    Source = #table(\n",
+                            "        type table [Currency = text, Symbol = text],\n",
+                            "        {\n",
+                            "            {\"UZS\", \"so'm\"},\n",
+                            "            {\"USD\", \"$\"}\n",
+                            "        }\n",
+                            "    )\n",
+                            "in\n",
+                            "    Source\n"
+                        ]
+                    }
+                }
+            ]
+        }
+        tables.append(currency_selector_table)
 
     # 6. SemanticModel definition/model.bim
     model_bim = {

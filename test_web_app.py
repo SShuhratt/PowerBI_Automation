@@ -408,6 +408,95 @@ def test_cfo_anomaly_detection_engine():
     print("[PASS] test_cfo_anomaly_detection_engine (Duplicate invoices, margin leakage, negative profit, and Audit_Exceptions table)")
 
 
+def test_cbu_fx_normalization():
+    """Verify Central Bank of Uzbekistan (CBU.uz) multi-currency detection, UZS/USD conversion, and Currency_Selector in .pbip."""
+    import pandas as pd
+    client = app.test_client()
+
+    multi_df = pd.DataFrame({
+        "order_id": [301, 302, 303, 304],
+        "order_date": ["2026-01-10", "2026-01-11", "2026-01-12", "2026-01-13"],
+        "product": ["Industrial Server", "Office Laptop", "Warehouse Scanner", "Barcode Labels"],
+        "currency": ["USD", "EUR", "UZS", "USD"],
+        "amount": [4500.0, 1800.0, 12000000.0, 250.0]
+    })
+
+    buf = io.BytesIO()
+    multi_df.to_csv(buf, index=False)
+    buf.seek(0)
+
+    data = {"file": (buf, "multi_currency_export.csv")}
+    res = client.post("/api/upload", data=data, content_type="multipart/form-data", headers=AUTH_HEADERS)
+    assert res.status_code == 200
+    result = res.get_json()
+    assert result["success"] is True
+
+    # Verify FX normalization audit
+    fx = result["fx_normalization"]
+    assert fx["is_multi_currency"] is True
+    assert set(fx["detected_currencies"]) == {"USD", "EUR", "UZS"}
+    assert "amount_uzs" in result["table_columns"]
+    assert "amount_usd" in result["table_columns"]
+
+    # Verify DAX measures
+    dax_names = [m["name"] for m in result["dax_measures"]]
+    assert "Total Volume (UZS)" in dax_names
+    assert "Total Volume (USD)" in dax_names
+    assert "Dynamic Currency Switcher" in dax_names
+
+    # Verify Currency_Selector table in model.bim
+    session_id = result["session_id"]
+    dl_res = client.get(f"/api/download/{session_id}")
+    assert dl_res.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
+    model_bim = json.loads(zf.read("AutoBI_Project.SemanticModel/definition/model.bim").decode("utf-8"))
+    table_names = [t["name"] for t in model_bim["model"]["tables"]]
+    assert "Currency_Selector" in table_names
+
+    print("[PASS] test_cbu_fx_normalization (CBU.uz live FX rates, dual UZS/USD conversion, and Currency_Selector parameter table)")
+
+
+def test_pareto_abc_segmentation():
+    """Verify Pareto (80/20) ABC classification tagging and DAX Class A/B/C metrics."""
+    import pandas as pd
+    client = app.test_client()
+
+    pareto_df = pd.DataFrame({
+        "order_id": [401, 402, 403, 404, 405, 406, 407],
+        "order_date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06", "2026-01-07"],
+        "product": ["Enterprise Core Switch", "Blade Server 2U", "Managed Router", "Patch Panel", "Ethernet Cable Cat6", "RJ45 Plugs", "Cable Tie Pack"],
+        "units_sold": [2, 3, 5, 10, 25, 100, 50],
+        "unit_price": [15000.0, 8000.0, 2000.0, 250.0, 30.0, 2.0, 5.0],
+        "total_revenue": [30000.0, 24000.0, 10000.0, 2500.0, 750.0, 200.0, 250.0]
+    })
+
+    buf = io.BytesIO()
+    pareto_df.to_csv(buf, index=False)
+    buf.seek(0)
+
+    data = {"file": (buf, "pareto_sales_catalog.csv")}
+    res = client.post("/api/upload", data=data, content_type="multipart/form-data", headers=AUTH_HEADERS)
+    assert res.status_code == 200
+    result = res.get_json()
+    assert result["success"] is True
+
+    # Verify Pareto segmentation audit
+    pareto = result["pareto_segmentation"]
+    assert pareto["is_segmented"] is True
+    assert pareto["class_a_count"] >= 1
+    assert pareto["class_a_revenue_share"] >= 75.0
+    assert "abc_class" in result["table_columns"]
+
+    # Verify DAX measures
+    dax_names = [m["name"] for m in result["dax_measures"]]
+    assert "Class A Volume" in dax_names
+    assert "Class A Share %" in dax_names
+    assert "Class B Volume" in dax_names
+    assert "Class C Volume" in dax_names
+
+    print("[PASS] test_pareto_abc_segmentation (Pareto 80/20 logic, abc_class column, and Class A Share % DAX)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -420,4 +509,6 @@ if __name__ == "__main__":
     test_google_sheets_connector()
     test_1c_crosstab_unpivoting()
     test_cfo_anomaly_detection_engine()
+    test_cbu_fx_normalization()
+    test_pareto_abc_segmentation()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

@@ -650,7 +650,70 @@ document.addEventListener('DOMContentLoaded', () => {
             auditList.appendChild(card);
         }
 
-        // 3. Dropped Summary Rows
+        // 3. Central Bank FX Normalization (CBU.uz)
+        const fx = audit.fx_normalization;
+        if (fx && fx.is_multi_currency) {
+            const card = document.createElement('div');
+            card.className = 'audit-card';
+            const ratesText = Object.entries(fx.rates_applied || {})
+                .filter(([c]) => c !== 'UZS')
+                .map(([c, r]) => `1 ${c} = ${Number(r).toLocaleString()} UZS`)
+                .join(' | ');
+
+            card.innerHTML = `
+                <div class="audit-card-header">
+                    <div class="audit-icon indigo">💱</div>
+                    <div>
+                        <h3>Multi-Currency FX Normalization (CBU.uz)</h3>
+                        <p class="text-xs text-slate-400">Converted mixed transaction currencies into standardized UZS and USD via official Central Bank of Uzbekistan rates.</p>
+                    </div>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Detected Currencies:</strong> ${escapeHtml((fx.detected_currencies || []).join(', '))}</span>
+                    <span class="audit-item-badge">Column: <code>${escapeHtml(fx.currency_column || 'currency')}</code></span>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Official CBU Rates Applied:</strong> ${escapeHtml(ratesText || '1 USD = 12,000 UZS')}</span>
+                    <span class="audit-item-badge">CBU Date: ${escapeHtml(fx.cbu_date || 'Today')}</span>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Normalized Columns Added:</strong> <code>${escapeHtml((fx.converted_columns || []).join(', '))}</code></span>
+                    <span class="audit-item-badge">UZS & USD Standardized</span>
+                </div>
+            `;
+            auditList.appendChild(card);
+        }
+
+        // 4. Pareto (80/20) ABC Segmentation
+        const pareto = audit.pareto_segmentation;
+        if (pareto && pareto.is_segmented) {
+            const card = document.createElement('div');
+            card.className = 'audit-card';
+            card.innerHTML = `
+                <div class="audit-card-header">
+                    <div class="audit-icon emerald">🎯</div>
+                    <div>
+                        <h3>Pareto (80/20) ABC Driver Segmentation</h3>
+                        <p class="text-xs text-slate-400">Identified vital high-volume contributors vs. long-tail drivers across <code>${escapeHtml(pareto.dimension_col || 'product')}</code>.</p>
+                    </div>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Class A (Top 80% Vital Few):</strong> ${pareto.class_a_count} key driver(s)</span>
+                    <span class="audit-item-badge" style="background: rgba(16,185,129,0.2); color: #6ee7b7;">${pareto.class_a_revenue_share}% Volume</span>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Class B (Next 15% Moderate):</strong> ${pareto.class_b_count} secondary driver(s)</span>
+                    <span class="audit-item-badge" style="background: rgba(6,182,212,0.2); color: #67e8f9;">${pareto.class_b_revenue_share}% Volume</span>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Class C (Bottom 5% Long-Tail):</strong> ${pareto.class_c_count} minor item(s)</span>
+                    <span class="audit-item-badge" style="background: rgba(148,163,184,0.2); color: #cbd5e1;">${pareto.class_c_revenue_share}% Volume</span>
+                </div>
+            `;
+            auditList.appendChild(card);
+        }
+
+        // 5. Dropped Summary Rows
         if (audit.dropped_rows && audit.dropped_rows.length > 0) {
             const card = document.createElement('div');
             card.className = 'audit-card';
@@ -813,8 +876,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (c === 'status') {
                     const badgeClass = val === 'Completed' ? 'status-completed' : (val === 'Cancelled' ? 'status-cancelled' : 'status-pending');
                     td.innerHTML = `<span class="status-badge ${badgeClass}">${val}</span>`;
+                } else if (c === 'abc_class') {
+                    const badgeBg = val === 'A' ? 'rgba(16,185,129,0.25)' : (val === 'B' ? 'rgba(6,182,212,0.25)' : 'rgba(148,163,184,0.2)');
+                    const badgeColor = val === 'A' ? '#6ee7b7' : (val === 'B' ? '#67e8f9' : '#cbd5e1');
+                    td.innerHTML = `<span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700;">Class ${val}</span>`;
                 } else if (typeof val === 'number') {
-                    if (c.includes('revenue') || c.includes('price') || c.includes('spend') || c.includes('cost') || c.includes('salary') || c.includes('value')) {
+                    if (c.includes('_uzs')) {
+                        td.textContent = val.toLocaleString() + " so'm";
+                        td.style.fontWeight = '500';
+                    } else if (c.includes('revenue') || c.includes('price') || c.includes('spend') || c.includes('cost') || c.includes('salary') || c.includes('value') || c.includes('_usd')) {
                         td.textContent = '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                         td.style.fontWeight = '500';
                     } else {

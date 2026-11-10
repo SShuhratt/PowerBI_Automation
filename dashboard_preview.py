@@ -16,12 +16,47 @@ def generate_html_dashboard(
     domain_info: dict,
     filename: str,
     anomalies: list = None,
-    anomaly_summary: dict = None
+    anomaly_summary: dict = None,
+    fx_info: dict = None,
+    pareto_info: dict = None
 ) -> str:
     domain_label = domain_info.get("label", "Business Analytics")
     domain_icon = domain_info.get("icon", "📊")
     anomalies = anomalies or []
     anomaly_summary = anomaly_summary or {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False}
+    fx_info = fx_info or {}
+    pareto_info = pareto_info or {}
+
+    # Multi-currency banner HTML
+    fx_banner_html = ""
+    if fx_info.get("is_multi_currency"):
+        rates_str = ", ".join([f"{c}: {r:,.1f} UZS" for c, r in fx_info.get("rates_applied", {}).items() if c != "UZS"])
+        fx_banner_html = f"""
+        <div class="glass-card rounded-xl px-4 py-3 border border-indigo-500/30 bg-indigo-500/5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2 text-indigo-300">
+                <span class="text-base">💱</span>
+                <span><strong>Multi-Currency FX Normalization:</strong> Converted ({', '.join(fx_info.get('detected_currencies', []))}) via <strong>CBU.uz</strong> official rates ({rates_str}).</span>
+            </div>
+            <span class="px-2.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[11px]">CBU Date: {fx_info.get('cbu_date', 'Today')}</span>
+        </div>
+        """
+
+    # Pareto 80/20 banner HTML
+    pareto_banner_html = ""
+    if pareto_info.get("is_segmented"):
+        pareto_banner_html = f"""
+        <div class="glass-card rounded-xl px-4 py-3 border border-amber-500/30 bg-amber-500/5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2 text-amber-300">
+                <span class="text-base">🎯</span>
+                <span><strong>Pareto (80/20) Segmentation:</strong> <strong>{pareto_info.get('class_a_count', 0)}</strong> Class A {pareto_info.get('dimension_col', 'items')} generate <strong>{pareto_info.get('class_a_revenue_share', 0)}%</strong> of total volume.</span>
+            </div>
+            <div class="flex items-center gap-2 font-mono text-[11px]">
+                <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Class A: {pareto_info.get('class_a_revenue_share', 0)}%</span>
+                <span class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Class B: {pareto_info.get('class_b_revenue_share', 0)}%</span>
+                <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">Class C: {pareto_info.get('class_c_revenue_share', 0)}%</span>
+            </div>
+        </div>
+        """
 
     # Format Anomaly Alerts HTML
     if anomalies:
@@ -130,6 +165,10 @@ def generate_html_dashboard(
 
         <!-- CFO Red-Flags & Audit Exceptions -->
         {alerts_html}
+
+        <!-- Multi-Currency & Pareto Insights -->
+        {fx_banner_html}
+        {pareto_banner_html}
 
         <!-- KPI Grid -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">

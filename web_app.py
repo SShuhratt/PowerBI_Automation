@@ -491,6 +491,9 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
     # 8. Generate standalone Executive HTML dashboard
     anomalies_list = cleaner.audit_log.get("anomalies", [])
     anomaly_summary_dict = cleaner.audit_log.get("anomaly_summary", {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False})
+    fx_dict = cleaner.audit_log.get("fx_normalization", {"is_multi_currency": False})
+    pareto_dict = cleaner.audit_log.get("pareto_segmentation", {"is_segmented": False})
+
     dashboard_html = generate_html_dashboard(
         df,
         kpis,
@@ -498,7 +501,9 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         domain_info,
         filename,
         anomalies=anomalies_list,
-        anomaly_summary=anomaly_summary_dict
+        anomaly_summary=anomaly_summary_dict,
+        fx_info=fx_dict,
+        pareto_info=pareto_dict
     )
 
     # 9. Generate Native Power BI Project (.pbip) artifacts
@@ -507,7 +512,8 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         model_gen.table_name,
         measures,
         m_script,
-        anomalies=anomalies_list
+        anomalies=anomalies_list,
+        fx_info=fx_dict
     )
 
     # Persist session with artifacts, dashboard preview and PBIP bundle
@@ -550,6 +556,8 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "anomalies": anomalies_list,
         "anomaly_summary": anomaly_summary_dict,
         "unpivoted_matrix": cleaner.audit_log.get("unpivoted_matrix", {"is_unpivoted": False}),
+        "fx_normalization": fx_dict,
+        "pareto_segmentation": pareto_dict,
         "dax_measures": measures,
         "power_query_m": m_script,
         "sheet_info": {

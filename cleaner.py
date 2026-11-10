@@ -9,6 +9,7 @@ import re
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import cbu_client
 
 
 MONTH_NAMES_MAP = {
@@ -50,6 +51,8 @@ class SelfHealingCleaner:
             "renamed_columns": {},
             "datatype_conversions": {},
             "unpivoted_matrix": {"is_unpivoted": False},
+            "fx_normalization": {"is_multi_currency": False},
+            "pareto_segmentation": {"is_segmented": False},
             "anomalies": [],
             "anomaly_summary": {
                 "total_flags": 0,
@@ -391,6 +394,168 @@ class SelfHealingCleaner:
         self.audit_log["anomaly_summary"] = summary
         return summary
 
+    def _detect_and_normalize_currencies(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Detect multi-currency transactions and normalize to UZS and USD via Central Bank of Uzbekistan (CBU.uz)."""
+        cols = list(df.columns)
+        curr_cands = [c for c in cols if any(k == c.lower() or f"_{k}" in c.lower() for k in ["currency", "valyuta", "валюта", "curr", "ccy"])]
+
+        # Check explicit currency column
+        if curr_cands:
+            curr_col = curr_cands[0]
+            norm_ccys = df[curr_col].dropna().astype(str).apply(cbu_client.normalize_currency_code)
+            unique_ccys = set(norm_ccys.unique())
+            is_multi = len(unique_ccys) > 1 or any(c in unique_ccys for c in ["USD", "EUR", "RUB", "GBP"])
+
+            if is_multi:
+                # Find the primary amount/revenue column to convert
+                amt_cands = [c for c in cols if any(k in c.lower() for k in ["total_revenue", "revenue", "sales_amount", "amount", "price", "unit_price", "cost", "unit_cost"])]
+                if amt_cands:
+                    amt_col = amt_cands[0]
+                    if pd.api.types.is_numeric_dtype(df[amt_col]):
+                        rates, meta = cbu_client.get_cbu_rates()
+                        usd_rate = rates.get("USD", 12000.0)
+
+                        df["currency_normalized"] = norm_ccys
+                        df[f"{amt_col}_uzs"] = df.apply(
+                            lambda r: round(float(r[amt_col]) * rates.get(str(r["currency_normalized"]).upper(), 1.0), 2)
+                            if pd.notna(r[amt_col]) and str(r["currency_normalized"]).upper() in rates else r[amt_col],
+                            axis=1
+                        )
+                        df[f"{amt_col}_usd"] = df[f"{amt_col}_uzs"].apply(
+                            lambda v: round(float(v) / usd_rate, 2) if pd.notna(v) and usd_rate > 0 else v
+                        )
+
+                        self.audit_log["fx_normalization"] = {
+                            "is_multi_currency": True,
+                            "currency_column": curr_col,
+                            "detected_currencies": list(unique_ccys),
+                            "rates_applied": {c: rates.get(c, 1.0) for c in unique_ccys if c in rates},
+                            "cbu_date": meta.get("cbu_date", "Today"),
+                            "source": meta.get("source", "live"),
+                            "converted_columns": [f"{amt_col}_uzs", f"{amt_col}_usd"],
+                            "summary": f"Normalized mixed transactions ({', '.join(unique_ccys)}) to standardized UZS and USD via Central Bank FX rates."
+                        }
+                        return df
+
+        # Check currency-specific column names (e.g. revenue_usd, amount_uzs)
+        usd_cols = [c for c in cols if "_usd" in c.lower() or c.lower().endswith("usd")]
+        uzs_cols = [c for c in cols if any(k in c.lower() for k in ["_uzs", "_som", "_сум"])]
+
+        if usd_cols and not uzs_cols:
+            col_u = usd_cols[0]
+            if pd.api.types.is_numeric_dtype(df[col_u]):
+                rates, meta = cbu_client.get_cbu_rates()
+                usd_rate = rates.get("USD", 12000.0)
+                col_uzs_name = col_u.replace("_usd", "_uzs") if "_usd" in col_u else f"{col_u}_uzs"
+                df[col_uzs_name] = (df[col_u] * usd_rate).round(2)
+                self.audit_log["fx_normalization"] = {
+                    "is_multi_currency": True,
+                    "currency_column": col_u,
+                    "detected_currencies": ["USD"],
+                    "rates_applied": {"USD": usd_rate},
+                    "cbu_date": meta.get("cbu_date", "Today"),
+                    "source": meta.get("source", "live"),
+                    "converted_columns": [col_uzs_name, col_u],
+                    "summary": f"Computed UZS equivalent from '{col_u}' using Central Bank rate (1 USD = {usd_rate:,.2f} UZS)."
+                }
+        elif uzs_cols and not usd_cols:
+            col_z = uzs_cols[0]
+            if pd.api.types.is_numeric_dtype(df[col_z]):
+                rates, meta = cbu_client.get_cbu_rates()
+                usd_rate = rates.get("USD", 12000.0)
+                col_usd_name = col_z.replace("_uzs", "_usd").replace("_som", "_usd").replace("_сум", "_usd")
+                if col_usd_name == col_z:
+                    col_usd_name = f"{col_z}_usd"
+                df[col_usd_name] = (df[col_z] / usd_rate).round(2)
+                self.audit_log["fx_normalization"] = {
+                    "is_multi_currency": True,
+                    "currency_column": col_z,
+                    "detected_currencies": ["UZS"],
+                    "rates_applied": {"USD": usd_rate},
+                    "cbu_date": meta.get("cbu_date", "Today"),
+                    "source": meta.get("source", "live"),
+                    "converted_columns": [col_z, col_usd_name],
+                    "summary": f"Computed USD equivalent from '{col_z}' using Central Bank rate (1 USD = {usd_rate:,.2f} UZS)."
+                }
+
+        return df
+
+    def _apply_pareto_abc_segmentation(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculates Pareto 80/20 ABC segmentation on categorical drivers (products, SKUs, customers)."""
+        if len(df) < 3:
+            return df
+
+        cols = list(df.columns)
+        dim_cands = [c for c in cols if any(k in c.lower() for k in ["product", "item", "sku", "category", "nomenklatura", "customer", "client", "branch", "service", "material"])]
+        if not dim_cands:
+            return df
+
+        preferred_order = [
+            "total_revenue_uzs", "total_revenue_usd", "amount_uzs", "amount_usd",
+            "total_revenue", "revenue", "sales_amount", "amount", "stock_value", "total_cost", "units_sold"
+        ]
+        met_col = None
+        for pref in preferred_order:
+            for c in cols:
+                if c.lower() == pref or c.lower().endswith(f"_{pref}"):
+                    if pd.api.types.is_numeric_dtype(df[c]):
+                        met_col = c
+                        break
+            if met_col:
+                break
+
+        if not met_col:
+            for c in cols:
+                if any(k in c.lower() for k in ["revenue", "amount", "sales", "cost"]) and pd.api.types.is_numeric_dtype(df[c]):
+                    met_col = c
+                    break
+
+        if not met_col:
+            return df
+
+        dim_col = dim_cands[0]
+
+        grp = df.groupby(dim_col)[met_col].sum().sort_values(ascending=False)
+        total = grp.sum()
+        if total <= 0 or len(grp) < 2:
+            return df
+
+        prev_pct = (grp.cumsum() - grp) / total
+        class_map = {}
+        for item in grp.index:
+            p = prev_pct[item]
+            if p < 0.80:
+                class_map[item] = "A"
+            elif p < 0.95:
+                class_map[item] = "B"
+            else:
+                class_map[item] = "C"
+
+        df["abc_class"] = df[dim_col].map(class_map).fillna("C")
+
+        count_a = sum(1 for v in class_map.values() if v == "A")
+        count_b = sum(1 for v in class_map.values() if v == "B")
+        count_c = sum(1 for v in class_map.values() if v == "C")
+
+        share_a = (df[df["abc_class"] == "A"][met_col].sum() / total) * 100
+        share_b = (df[df["abc_class"] == "B"][met_col].sum() / total) * 100
+        share_c = (df[df["abc_class"] == "C"][met_col].sum() / total) * 100
+
+        self.audit_log["pareto_segmentation"] = {
+            "is_segmented": True,
+            "dimension_col": dim_col,
+            "metric_col": met_col,
+            "class_a_count": int(count_a),
+            "class_b_count": int(count_b),
+            "class_c_count": int(count_c),
+            "class_a_revenue_share": round(float(share_a), 1),
+            "class_b_revenue_share": round(float(share_b), 1),
+            "class_c_revenue_share": round(float(share_c), 1),
+            "summary": f"Pareto (80/20) segmentation active: {count_a} Class A {dim_col}(s) generate {share_a:.1f}% of total {met_col}."
+        }
+
+        return df
+
     def _clean_column_name(self, col) -> str:
         """Standardize column names for clean DAX / Power Query use."""
         clean = str(col).strip() if pd.notna(col) else ""
@@ -608,6 +773,12 @@ class SelfHealingCleaner:
                             continue
                     df[col] = df[col].apply(lambda v: str(v).strip() if pd.notna(v) else np.nan)
                     self.audit_log["datatype_conversions"][str_col] = "string"
+
+        # 5.5 Multi-Currency & CBU.uz FX Normalization
+        df = self._detect_and_normalize_currencies(df)
+
+        # 5.6 ABC / Pareto (80/20) Segmentation
+        df = self._apply_pareto_abc_segmentation(df)
 
         # 6. CFO Red-Flags & Business Anomaly Detection
         self._detect_business_anomalies(df)
