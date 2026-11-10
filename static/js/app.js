@@ -146,10 +146,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             telegramChatIdInput.required = false;
                         }
                     } else if (configData.has_token) {
+                        const botName = configData.bot_username || '@auto_bibot';
+                        const cleanBotName = botName.replace('@', '');
                         telegramConfigStatus.style.background = 'rgba(6, 182, 212, 0.15)';
                         telegramConfigStatus.style.border = '1px solid rgba(6, 182, 212, 0.3)';
                         telegramConfigStatus.style.color = '#67e8f9';
-                        telegramConfigStatus.innerHTML = `<span>✓ Server bot token active. Please enter target Chat ID or Channel username below.</span>`;
+                        telegramConfigStatus.innerHTML = `<span>✓ Server bot connected: <a href="https://t.me/${cleanBotName}" target="_blank" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">${botName}</a>. Enter target Chat ID or Channel username below.</span>`;
+                        if (telegramBotTokenInput) {
+                            telegramBotTokenInput.placeholder = `Pre-configured (${botName})`;
+                        }
                         if (telegramChatIdInput) telegramChatIdInput.required = true;
                     } else {
                         telegramConfigStatus.style.background = 'rgba(245, 158, 11, 0.15)';

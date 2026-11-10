@@ -528,7 +528,7 @@ def test_telegram_executive_dispatcher():
     assert sample_res.status_code == 200
     session_id = sample_res.get_json()["session_id"]
 
-    with patch.dict("os.environ", {}, clear=True):
+    with patch("telegram_client.get_default_telegram_config", return_value=(None, None)):
         no_creds = client.post(
             "/api/telegram/dispatch",
             json={"session_id": session_id},

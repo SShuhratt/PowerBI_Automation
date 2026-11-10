@@ -730,11 +730,13 @@ def preview_dashboard(session_id: str):
 @require_auth
 def telegram_config():
     """Returns whether Telegram Bot credentials are configured."""
-    from telegram_client import get_default_telegram_config
+    from telegram_client import get_default_telegram_config, get_bot_username
     token, chat_id = get_default_telegram_config()
+    username = get_bot_username() if token else None
     return jsonify({
         "configured": bool(token and chat_id),
         "has_token": bool(token),
+        "bot_username": username,
         "chat_id_configured": bool(chat_id),
         "default_chat_id": (chat_id[:4] + "..." + chat_id[-4:]) if chat_id and len(chat_id) > 8 else chat_id
     })

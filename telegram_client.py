@@ -13,10 +13,48 @@ from typing import Dict, Any, Optional, Tuple
 
 
 def get_default_telegram_config() -> Tuple[Optional[str], Optional[str]]:
-    """Retrieves default bot token and chat ID from environment variables."""
+    """Retrieves default bot token and chat ID from environment variables or local env files."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        for fname in (".coolify.env", ".env"):
+            p = os.path.join(os.path.dirname(__file__), fname)
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                k, v = k.strip(), v.strip().rstrip(";")
+                                if k == "TELEGRAM_BOT_TOKEN" and not token:
+                                    token = v
+                                elif k == "TELEGRAM_CHAT_ID" and not chat_id:
+                                    chat_id = v
+                except Exception:
+                    pass
     return token, chat_id
+
+
+def get_bot_username() -> str:
+    """Retrieves configured Telegram bot username."""
+    username = os.environ.get("TELEGRAM_BOT_USERNAME")
+    if not username:
+        for fname in (".coolify.env", ".env"):
+            p = os.path.join(os.path.dirname(__file__), fname)
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                if k.strip() == "TELEGRAM_BOT_USERNAME":
+                                    username = v.strip().rstrip(";")
+                except Exception:
+                    pass
+    return username or "@auto_bibot"
 
 
 def escape_html(text: Any) -> str:
