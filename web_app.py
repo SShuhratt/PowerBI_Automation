@@ -729,23 +729,75 @@ def preview_dashboard(session_id: str):
 @app.route("/api/telegram/config", methods=["GET"])
 @require_auth
 def telegram_config():
-    """Returns whether Telegram Bot credentials are configured."""
-    from telegram_client import get_default_telegram_config, get_bot_username
+    """Returns whether Telegram Bot credentials are configured and lists recent subscribers."""
+    from telegram_client import get_default_telegram_config, get_bot_username, get_recent_subscribers, poll_and_sync_updates
     token, chat_id = get_default_telegram_config()
     username = get_bot_username() if token else None
+
+    # Sync any recent updates
+    if token:
+        try:
+            poll_and_sync_updates()
+        except Exception:
+            pass
+
+    recents = get_recent_subscribers(limit=5) if token else []
+
     return jsonify({
         "configured": bool(token and chat_id),
         "has_token": bool(token),
         "bot_username": username,
         "chat_id_configured": bool(chat_id),
-        "default_chat_id": (chat_id[:4] + "..." + chat_id[-4:]) if chat_id and len(chat_id) > 8 else chat_id
+        "default_chat_id": (chat_id[:4] + "..." + chat_id[-4:]) if chat_id and len(chat_id) > 8 else chat_id,
+        "recent_subscribers": recents
     })
+
+
+@app.route("/api/telegram/poll-connection", methods=["GET"])
+@require_auth
+def telegram_poll_connection():
+    """Poll Telegram Bot API for incoming /start messages with a matching connection code."""
+    from telegram_client import poll_and_sync_updates, get_subscriber_by_param, get_recent_subscribers
+    code = request.args.get("code", "").strip()
+
+    try:
+        poll_and_sync_updates()
+    except Exception:
+        pass
+
+    if code:
+        sub = get_subscriber_by_param(code)
+        if sub:
+            uname = sub.get("username")
+            fn = sub.get("first_name")
+            label = f"{fn} (@{uname})" if (fn and uname) else (f"@{uname}" if uname else (fn or f"Chat {sub['chat_id']}"))
+            return jsonify({
+                "connected": True,
+                "chat_id": sub["chat_id"],
+                "username": uname,
+                "first_name": fn,
+                "label": label
+            })
+
+    # Fallback to subscriber active in the last 60 seconds
+    recents = get_recent_subscribers(limit=1)
+    if recents and (time.time() - recents[0].get("updated_at", 0)) < 60:
+        r = recents[0]
+        return jsonify({
+            "connected": True,
+            "chat_id": r["chat_id"],
+            "username": r.get("username"),
+            "first_name": r.get("first_name"),
+            "label": r.get("label", str(r["chat_id"]))
+        })
+
+    return jsonify({"connected": False})
 
 
 @app.route("/api/telegram/dispatch", methods=["POST"])
 @require_auth
 def telegram_dispatch():
-    """Dispatch executive digest and interactive HTML report directly to Telegram."""
+    """Dispatch executive digest and interactive HTML report directly to Telegram (single or multiple targets)."""
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id")
     if not session_id:
@@ -756,11 +808,12 @@ def telegram_dispatch():
         return jsonify({"error": "Session expired or invalid. Please re-run analysis."}), 404
 
     chat_id = data.get("chat_id")
+    targets = data.get("targets")
     bot_token = data.get("bot_token")
 
     try:
         from telegram_client import dispatch_executive_report
-        result = dispatch_executive_report(session_data, chat_id=chat_id, bot_token=bot_token)
+        result = dispatch_executive_report(session_data, chat_id=chat_id, targets=targets, bot_token=bot_token)
         return jsonify(result)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

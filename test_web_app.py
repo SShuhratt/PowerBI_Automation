@@ -574,7 +574,55 @@ def test_telegram_executive_dispatcher():
         assert mock_doc.call_args[1]["filename"].endswith(".html")
         assert mock_doc.call_args[1]["chat_id"] == "@board_directors"
 
-    print("[PASS] test_telegram_executive_dispatcher (Config, validation, digest HTML formatting, and document dispatch)")
+    # 7. Deep linking auto-detect polling test
+    from telegram_client import upsert_subscriber
+    poll_unfound = client.get("/api/telegram/poll-connection?code=test_code_99", headers=AUTH_HEADERS)
+    assert poll_unfound.status_code == 200
+    assert poll_unfound.get_json()["connected"] is False
+
+    # Simulate user tapping Start on Telegram bot with parameter 'test_code_99'
+    upsert_subscriber({
+        "chat_id": 77665544,
+        "username": "executive_director",
+        "first_name": "Executive",
+        "last_start_param": "test_code_99"
+    })
+    poll_found = client.get("/api/telegram/poll-connection?code=test_code_99", headers=AUTH_HEADERS)
+    assert poll_found.status_code == 200
+    assert poll_found.get_json()["connected"] is True
+    assert poll_found.get_json()["chat_id"] == 77665544
+    assert poll_found.get_json()["username"] == "executive_director"
+
+    # 8. Multi-recipient dispatch with link & username resolution
+    with patch("telegram_client.send_telegram_message", return_value=mock_msg_resp) as multi_msg, \
+         patch("telegram_client.send_telegram_document", return_value=mock_doc_resp) as multi_doc:
+
+        multi_res = client.post(
+            "/api/telegram/dispatch",
+            json={
+                "session_id": session_id,
+                "targets": [
+                    "https://t.me/company_board_channel",
+                    "@executive_director",
+                    "11223344"
+                ],
+                "bot_token": "123456789:ABCDEF_TEST_TOKEN"
+            },
+            headers=AUTH_HEADERS
+        )
+        assert multi_res.status_code == 200
+        multi_data = multi_res.get_json()
+        assert multi_data["success"] is True
+        assert multi_data["dispatched_count"] == 3
+        assert len(multi_data["dispatched"]) == 3
+
+        # Verify normalized destinations
+        dests = [d["destination"] for d in multi_data["dispatched"]]
+        assert "@company_board_channel" in dests
+        assert "77665544" in dests  # Resolved from @executive_director!
+        assert "11223344" in dests
+
+    print("[PASS] test_telegram_executive_dispatcher (Config, 1-click deep link polling, multi-recipient dispatch, and URL resolution)")
 
 
 if __name__ == "__main__":

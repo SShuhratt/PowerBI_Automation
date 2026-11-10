@@ -39,8 +39,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const telegramModal = document.getElementById('telegramModal');
     const closeTelegramModalBtn = document.getElementById('closeTelegramModalBtn');
     const telegramDispatchForm = document.getElementById('telegramDispatchForm');
-    const telegramChatIdInput = document.getElementById('telegramChatIdInput');
-    const telegramBotTokenInput = document.getElementById('telegramBotTokenInput');
+    const tgDirectStartLink = document.getElementById('tgDirectStartLink');
+    const tgCheckConnectBtn = document.getElementById('tgCheckConnectBtn');
+    const tgDetectBadge = document.getElementById('tgDetectBadge');
+    const tgConnectedUserBanner = document.getElementById('tgConnectedUserBanner');
+    const tgRecentChatsWrap = document.getElementById('tgRecentChatsWrap');
+    const tgRecentPills = document.getElementById('tgRecentPills');
+    const telegramTargetsInput = document.getElementById('telegramTargetsInput');
     const telegramStatusMsg = document.getElementById('telegramStatusMsg');
     const telegramConfigStatus = document.getElementById('telegramConfigStatus');
     const telegramSubmitBtn = document.getElementById('telegramSubmitBtn');
@@ -118,6 +123,46 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAuthStatus();
 
     // --- Telegram Executive Digest Dispatcher ---
+    let tgConnectCode = null;
+    let tgPollTimer = null;
+    let connectedChatId = null;
+    let connectedUserLabel = null;
+
+    async function checkTelegramConnection() {
+        if (!tgConnectCode) return;
+        try {
+            const res = await fetch(`/api/telegram/poll-connection?code=${tgConnectCode}`);
+            const data = await res.json();
+            if (data.connected && data.chat_id) {
+                connectedChatId = data.chat_id;
+                connectedUserLabel = data.label || data.first_name || data.username || String(data.chat_id);
+                if (tgDetectBadge) {
+                    tgDetectBadge.textContent = '✓ Connected';
+                    tgDetectBadge.style.background = 'rgba(16, 185, 129, 0.25)';
+                    tgDetectBadge.style.color = '#6ee7b7';
+                }
+                if (tgConnectedUserBanner) {
+                    tgConnectedUserBanner.style.display = 'block';
+                    tgConnectedUserBanner.innerHTML = `✓ Connected: <b>${connectedUserLabel}</b>. Report will be delivered to your Telegram chat!`;
+                }
+                if (tgPollTimer) {
+                    clearInterval(tgPollTimer);
+                    tgPollTimer = null;
+                }
+            }
+        } catch (e) {
+            console.warn('Telegram poll error:', e);
+        }
+    }
+
+    function closeTgModal() {
+        if (telegramModal) telegramModal.style.display = 'none';
+        if (tgPollTimer) {
+            clearInterval(tgPollTimer);
+            tgPollTimer = null;
+        }
+    }
+
     if (sendTelegramBtn) {
         sendTelegramBtn.addEventListener('click', async () => {
             if (!currentSessionId) {
@@ -125,43 +170,60 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Reset status and inputs
+            // Reset state
+            connectedChatId = null;
+            connectedUserLabel = null;
+            if (tgConnectedUserBanner) tgConnectedUserBanner.style.display = 'none';
+            if (tgDetectBadge) {
+                tgDetectBadge.textContent = 'Auto-detecting...';
+                tgDetectBadge.style.background = 'rgba(255,255,255,0.08)';
+                tgDetectBadge.style.color = 'var(--text-muted)';
+            }
             if (telegramStatusMsg) {
                 telegramStatusMsg.style.display = 'none';
                 telegramStatusMsg.textContent = '';
             }
 
-            // Fetch server Telegram Bot configuration status
+            // Generate unique connection token
+            tgConnectCode = 'c' + Math.random().toString(36).substring(2, 8);
+
+            // Fetch server Telegram Bot configuration & recent subscribers
             try {
                 const configRes = await fetch('/api/telegram/config');
                 const configData = await configRes.json();
-                if (telegramConfigStatus) {
-                    if (configData.configured) {
-                        telegramConfigStatus.style.background = 'rgba(16, 185, 129, 0.15)';
-                        telegramConfigStatus.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-                        telegramConfigStatus.style.color = '#6ee7b7';
-                        telegramConfigStatus.innerHTML = `<span>✓ Server bot token active. Default chat ID configured (${configData.default_chat_id}).</span>`;
-                        if (telegramChatIdInput) {
-                            telegramChatIdInput.placeholder = "Pre-configured in server (leave blank to use default)";
-                            telegramChatIdInput.required = false;
-                        }
-                    } else if (configData.has_token) {
-                        const botName = configData.bot_username || '@auto_bibot';
-                        const cleanBotName = botName.replace('@', '');
-                        telegramConfigStatus.style.background = 'rgba(6, 182, 212, 0.15)';
-                        telegramConfigStatus.style.border = '1px solid rgba(6, 182, 212, 0.3)';
-                        telegramConfigStatus.style.color = '#67e8f9';
-                        telegramConfigStatus.innerHTML = `<span>✓ Server bot connected: <a href="https://t.me/${cleanBotName}" target="_blank" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">${botName}</a>. Enter target Chat ID or Channel username below.</span>`;
-                        if (telegramBotTokenInput) {
-                            telegramBotTokenInput.placeholder = `Pre-configured (${botName})`;
-                        }
-                        if (telegramChatIdInput) telegramChatIdInput.required = true;
+                const botName = configData.bot_username || '@auto_bibot';
+                const cleanBotName = botName.replace('@', '');
+
+                if (tgDirectStartLink) {
+                    tgDirectStartLink.href = `https://t.me/${cleanBotName}?start=${tgConnectCode}`;
+                    tgDirectStartLink.textContent = `🚀 Open ${botName} & Start`;
+                }
+
+                // Render recent subscriber pills
+                if (tgRecentPills && tgRecentChatsWrap) {
+                    const recents = configData.recent_subscribers || [];
+                    if (recents.length > 0) {
+                        tgRecentPills.innerHTML = '';
+                        recents.forEach(sub => {
+                            const pill = document.createElement('button');
+                            pill.type = 'button';
+                            pill.className = 'btn btn-secondary';
+                            pill.style.cssText = 'padding: 4px 10px; font-size: 11px; border-radius: 12px; margin: 0;';
+                            pill.textContent = `+ ${sub.label}`;
+                            pill.title = 'Click to add to recipients';
+                            pill.onclick = () => {
+                                const current = telegramTargetsInput ? telegramTargetsInput.value.trim() : '';
+                                const targetVal = sub.username ? `@${sub.username}` : String(sub.chat_id);
+                                if (telegramTargetsInput) {
+                                    telegramTargetsInput.value = current ? `${current}, ${targetVal}` : targetVal;
+                                    telegramTargetsInput.focus();
+                                }
+                            };
+                            tgRecentPills.appendChild(pill);
+                        });
+                        tgRecentChatsWrap.style.display = 'block';
                     } else {
-                        telegramConfigStatus.style.background = 'rgba(245, 158, 11, 0.15)';
-                        telegramConfigStatus.style.border = '1px solid rgba(245, 158, 11, 0.3)';
-                        telegramConfigStatus.style.color = '#fcd34d';
-                        telegramConfigStatus.innerHTML = `<span>⚠️ No server credentials set. Please provide both Chat ID and Bot Token below.</span>`;
-                        if (telegramChatIdInput) telegramChatIdInput.required = true;
+                        tgRecentChatsWrap.style.display = 'none';
                     }
                 }
             } catch (err) {
@@ -169,20 +231,22 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (telegramModal) telegramModal.style.display = 'flex';
+
+            // Start polling for user /start
+            if (tgPollTimer) clearInterval(tgPollTimer);
+            tgPollTimer = setInterval(checkTelegramConnection, 1800);
         });
     }
 
-    if (closeTelegramModalBtn && telegramModal) {
-        closeTelegramModalBtn.addEventListener('click', () => {
-            telegramModal.style.display = 'none';
-        });
+    if (tgCheckConnectBtn) {
+        tgCheckConnectBtn.addEventListener('click', checkTelegramConnection);
     }
+
+    if (closeTelegramModalBtn) closeTelegramModalBtn.addEventListener('click', closeTgModal);
 
     if (telegramModal) {
         telegramModal.addEventListener('click', (e) => {
-            if (e.target === telegramModal) {
-                telegramModal.style.display = 'none';
-            }
+            if (e.target === telegramModal) closeTgModal();
         });
     }
 
@@ -191,6 +255,37 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             if (!currentSessionId) {
                 alert('Session expired. Please re-run analysis.');
+                return;
+            }
+
+            // Gather all recipient targets
+            const rawTargets = telegramTargetsInput ? telegramTargetsInput.value.trim() : '';
+            const targetsList = [];
+
+            // Add connected user chat if active
+            if (connectedChatId) {
+                targetsList.push(String(connectedChatId));
+            }
+
+            // Parse additional comma or newline separated links/usernames
+            if (rawTargets) {
+                const parts = rawTargets.split(/[,;\n\r]+/);
+                parts.forEach(p => {
+                    const clean = p.trim();
+                    if (clean && !targetsList.includes(clean)) {
+                        targetsList.push(clean);
+                    }
+                });
+            }
+
+            if (targetsList.length === 0) {
+                if (telegramStatusMsg) {
+                    telegramStatusMsg.style.display = 'block';
+                    telegramStatusMsg.style.background = 'rgba(245, 158, 11, 0.15)';
+                    telegramStatusMsg.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                    telegramStatusMsg.style.color = '#fcd34d';
+                    telegramStatusMsg.textContent = 'Please tap "Open @auto_bibot & Start" in Telegram, or enter at least one recipient link or username.';
+                }
                 return;
             }
 
@@ -204,16 +299,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                const chatIdVal = telegramChatIdInput ? telegramChatIdInput.value.trim() : '';
-                const botTokenVal = telegramBotTokenInput ? telegramBotTokenInput.value.trim() : '';
-
                 const res = await fetch('/api/telegram/dispatch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         session_id: currentSessionId,
-                        chat_id: chatIdVal || undefined,
-                        bot_token: botTokenVal || undefined
+                        targets: targetsList
                     })
                 });
 
@@ -224,15 +315,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         telegramStatusMsg.style.background = 'rgba(16, 185, 129, 0.15)';
                         telegramStatusMsg.style.borderColor = 'rgba(16, 185, 129, 0.3)';
                         telegramStatusMsg.style.color = '#6ee7b7';
-                        telegramStatusMsg.innerHTML = `<b>✓ Dispatched successfully!</b> Sent executive digest and HTML dashboard to Telegram (Msg ID #${data.message_id || 'OK'}).`;
+                        const count = data.dispatched_count || (data.dispatched ? data.dispatched.length : 1);
+                        telegramStatusMsg.innerHTML = `<b>✓ Dispatched successfully!</b> Sent executive digest and HTML dashboard to <b>${count}</b> recipient(s).`;
                     }
                     setTimeout(() => {
-                        if (telegramModal) telegramModal.style.display = 'none';
+                        closeTgModal();
                         if (telegramSubmitBtn) {
                             telegramSubmitBtn.disabled = false;
                             telegramSubmitBtn.textContent = '✈️ Send Report';
                         }
-                    }, 1800);
+                    }, 2000);
                 } else {
                     if (telegramStatusMsg) {
                         telegramStatusMsg.style.display = 'block';
