@@ -64,3 +64,4 @@ def fetch_google_sheets_csv(url_or_id: str, timeout: int = 15) -> Tuple[io.Bytes
         raise RuntimeError(f"HTTP error {e.code} fetching Google Sheet: {e.reason}")
     except urllib.error.URLError as e:
         raise ConnectionError(f"Could not connect to Google Sheets: {e.reason}")
+

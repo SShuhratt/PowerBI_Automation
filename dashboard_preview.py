@@ -9,9 +9,69 @@ import json
 import pandas as pd
 
 
-def generate_html_dashboard(df: pd.DataFrame, kpis: list, charts: dict, domain_info: dict, filename: str) -> str:
+def generate_html_dashboard(
+    df: pd.DataFrame,
+    kpis: list,
+    charts: dict,
+    domain_info: dict,
+    filename: str,
+    anomalies: list = None,
+    anomaly_summary: dict = None
+) -> str:
     domain_label = domain_info.get("label", "Business Analytics")
     domain_icon = domain_info.get("icon", "📊")
+    anomalies = anomalies or []
+    anomaly_summary = anomaly_summary or {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False}
+
+    # Format Anomaly Alerts HTML
+    if anomalies:
+        alerts_html = f"""
+        <section class="glass-card rounded-2xl p-6 border border-rose-500/30 bg-rose-500/5">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">🚨</span>
+                    <div>
+                        <h3 class="text-base font-bold text-white">Executive Red-Flags & Audit Alerts</h3>
+                        <p class="text-xs text-slate-400">Automated risk detection identified {anomaly_summary.get('total_flags', len(anomalies))} business anomalie(s) requiring management review.</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    {f'<span class="px-2.5 py-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-full text-xs font-semibold">{anomaly_summary.get("critical_count", 0)} Critical</span>' if anomaly_summary.get("critical_count", 0) > 0 else ''}
+                    {f'<span class="px-2.5 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-full text-xs font-semibold">{anomaly_summary.get("warning_count", 0)} Warning</span>' if anomaly_summary.get("warning_count", 0) > 0 else ''}
+                    {f'<span class="px-2.5 py-1 bg-sky-500/20 border border-sky-500/40 text-sky-300 rounded-full text-xs font-semibold">{anomaly_summary.get("info_count", 0)} Notice</span>' if anomaly_summary.get("info_count", 0) > 0 else ''}
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        """
+        for a in anomalies:
+            sev = a.get("severity", "warning")
+            badge_color = "rose" if sev == "critical" else ("amber" if sev == "warning" else "sky")
+            alerts_html += f"""
+                <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-{badge_color}-500/20 text-{badge_color}-400 border border-{badge_color}-500/30">
+                            {sev.upper()}
+                        </span>
+                        <span class="text-xs font-mono text-slate-400">{a.get('affected_count', 1)} record(s)</span>
+                    </div>
+                    <div class="text-sm font-semibold text-slate-200">{a.get('title', '')}</div>
+                    <p class="text-xs text-slate-400 leading-relaxed">{a.get('description', '')}</p>
+                </div>
+            """
+        alerts_html += """
+            </div>
+        </section>
+        """
+    else:
+        alerts_html = """
+        <section class="glass-card rounded-2xl p-4 border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+                <span class="text-emerald-400 text-lg">✓</span>
+                <span class="text-xs text-emerald-300 font-medium">Clean Audit Certification: 0 duplicate invoices, negative margins, or statistical outliers detected.</span>
+            </div>
+            <span class="text-[11px] text-emerald-400/80 font-mono">100% Data Integrity</span>
+        </section>
+        """
 
     # Format KPI cards HTML
     kpis_html = ""
@@ -67,6 +127,9 @@ def generate_html_dashboard(df: pd.DataFrame, kpis: list, charts: dict, domain_i
                 </button>
             </div>
         </header>
+
+        <!-- CFO Red-Flags & Audit Exceptions -->
+        {alerts_html}
 
         <!-- KPI Grid -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">

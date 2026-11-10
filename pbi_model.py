@@ -19,10 +19,12 @@ class PowerBIModelGenerator:
         df: pd.DataFrame,
         csv_path: str = "cleaned_data.csv",
         table_name: str = None,
-        domain: str = None
+        domain: str = None,
+        audit_log: dict = None
     ):
         self.df = df
         self.csv_path = csv_path.replace("\\", "\\\\") if csv_path else "cleaned_data.csv"
+        self.audit_log = audit_log or {}
 
         # Domain classification
         if domain and domain in DOMAINS:
@@ -536,9 +538,18 @@ class PowerBIModelGenerator:
         else:
             source_expr = f'File.Contents("{self.csv_path}")'
 
+        unpivot_info = self.audit_log.get("unpivoted_matrix", {})
+        unpivot_comment = ""
+        if unpivot_info.get("is_unpivoted"):
+            id_cols_quoted = "{" + ", ".join([f'"{c}"' for c in unpivot_info.get("id_columns", [])]) + "}"
+            unpivot_comment = f"""
+    // --- 1C / ERP Cross-Tab Unpivoting Recipe (for direct raw Excel/1C workbook connection) ---
+    // #"Unpivoted Other Columns" = Table.UnpivotOtherColumns(#"Promoted Headers", {id_cols_quoted}, "{unpivot_info.get('period_col', 'Period')}", "{unpivot_info.get('value_col', 'Amount')}"),
+"""
+
         m_code = f"""let
     Source = Csv.Document({source_expr}, [Delimiter=",", Columns={len(self.df.columns)}, Encoding=65001, QuoteStyle=QuoteStyle.None]),
-    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),{unpivot_comment}
     #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers", {m_types_str})
 in
     #"Changed Type"
@@ -567,6 +578,15 @@ in
         md_file = os.path.join(output_dir, "POWER_BI_MEASURES_CHEATSHEET.md")
         with open(md_file, "w", encoding="utf-8") as f:
             f.write(f"# Auto-Generated Power BI Measures for `{self.table_name}` ({self.domain_info.get('label', self.domain)})\n\n")
+
+            unpivot_info = self.audit_log.get("unpivoted_matrix", {})
+            if unpivot_info.get("is_unpivoted"):
+                f.write("> **Matrix Flattener Applied**: Detected and unpivoted wide monthly cross-tab columns into a normalized time series.\n\n")
+
+            anomaly_summary = self.audit_log.get("anomaly_summary", {})
+            if anomaly_summary.get("total_flags", 0) > 0:
+                f.write(f"> **CFO Audit Alerts**: Found {anomaly_summary.get('critical_count', 0)} critical risk(s) and {anomaly_summary.get('warning_count', 0)} warning(s). Review `audit_log.json`.\n\n")
+
             f.write("| Measure Name | Format | DAX Expression | Description |\n")
             f.write("| :--- | :--- | :--- | :--- |\n")
             for m in measures:

@@ -68,7 +68,7 @@ class SessionStore:
 
         if self.backend == "redis" and self.redis_client:
             try:
-                serialized = json.dumps(data, ensure_ascii=False)
+                serialized = json.dumps(data, ensure_ascii=False, default=str)
                 self.redis_client.set(f"session:{session_id}", serialized, ex=ttl)
                 return True
             except Exception as e:
@@ -76,7 +76,7 @@ class SessionStore:
 
         # Fallback to SQLite
         try:
-            serialized = json.dumps(data, ensure_ascii=False)
+            serialized = json.dumps(data, ensure_ascii=False, default=str)
             with self._get_sqlite_conn() as conn:
                 conn.execute("""
                     INSERT INTO sessions (session_id, payload, created_at, expires_at)

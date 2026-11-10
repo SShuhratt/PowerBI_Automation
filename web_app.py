@@ -171,7 +171,12 @@ def build_analysis_payload(
     csv_path_for_model = source_csv_path if (source_csv_path and (source_csv_path.startswith("http://") or source_csv_path.startswith("https://"))) else "cleaned_data.csv"
 
     # 1. Domain Classification & Model Generation
-    model_gen = PowerBIModelGenerator(df, csv_path=csv_path_for_model, domain=domain_override)
+    model_gen = PowerBIModelGenerator(
+        df,
+        csv_path=csv_path_for_model,
+        domain=domain_override,
+        audit_log=cleaner.audit_log
+    )
     domain_key = model_gen.domain
     domain_info = model_gen.domain_info
     measures = model_gen.generate_dax_measures()
@@ -484,10 +489,26 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
     records = preview_df.fillna("").to_dict(orient="records")
 
     # 8. Generate standalone Executive HTML dashboard
-    dashboard_html = generate_html_dashboard(df, kpis, charts, domain_info, filename)
+    anomalies_list = cleaner.audit_log.get("anomalies", [])
+    anomaly_summary_dict = cleaner.audit_log.get("anomaly_summary", {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False})
+    dashboard_html = generate_html_dashboard(
+        df,
+        kpis,
+        charts,
+        domain_info,
+        filename,
+        anomalies=anomalies_list,
+        anomaly_summary=anomaly_summary_dict
+    )
 
     # 9. Generate Native Power BI Project (.pbip) artifacts
-    pbip_files = generate_pbip_artifacts(df, model_gen.table_name, measures, m_script)
+    pbip_files = generate_pbip_artifacts(
+        df,
+        model_gen.table_name,
+        measures,
+        m_script,
+        anomalies=anomalies_list
+    )
 
     # Persist session with artifacts, dashboard preview and PBIP bundle
     sessions.set(session_id, {
@@ -496,7 +517,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "dax_content": dax_file_content,
         "m_script": m_script,
         "cheatsheet": cheatsheet_content,
-        "audit_log": cleaner.audit_log,
+        "audit_log": sanitize_for_json(cleaner.audit_log),
         "readme": readme_content,
         "filename": filename,
         "dashboard_html": dashboard_html,
@@ -526,6 +547,9 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "kpis": kpis,
         "charts": charts,
         "audit_log": cleaner.audit_log,
+        "anomalies": anomalies_list,
+        "anomaly_summary": anomaly_summary_dict,
+        "unpivoted_matrix": cleaner.audit_log.get("unpivoted_matrix", {"is_unpivoted": False}),
         "dax_measures": measures,
         "power_query_m": m_script,
         "sheet_info": {

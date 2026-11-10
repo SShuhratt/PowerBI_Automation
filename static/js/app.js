@@ -331,6 +331,31 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // Executive Anomaly Alert Banner
+        const alertBanner = document.getElementById('dashboardAlertBanner');
+        if (alertBanner) {
+            const summary = data.anomaly_summary || {};
+            if (summary.has_critical || (summary.total_flags && summary.total_flags > 0)) {
+                alertBanner.style.display = 'flex';
+                alertBanner.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>🚨</span>
+                        <span><strong>Executive risk alert:</strong> Found ${summary.critical_count || 0} critical risk(s) and ${summary.warning_count || 0} warning(s) in this dataset.</span>
+                    </div>
+                    <button id="viewAuditRiskLink" style="background: none; border: none; color: #f43f5e; text-decoration: underline; font-weight: 600; cursor: pointer; font-size: 13px;">Review audit details →</button>
+                `;
+                const btn = document.getElementById('viewAuditRiskLink');
+                if (btn) {
+                    btn.onclick = () => {
+                        const auditTabBtn = document.querySelector('.tab-btn[data-tab="tabAudit"]');
+                        if (auditTabBtn) auditTabBtn.click();
+                    };
+                }
+            } else {
+                alertBanner.style.display = 'none';
+            }
+        }
+
         // Multi-Sheet Tab Picker
         if (sheetPickerWrap && sheetSelect && data.sheet_info) {
             const sheets = data.sheet_info.available_sheets || [];
@@ -533,7 +558,99 @@ document.addEventListener('DOMContentLoaded', () => {
         const auditList = document.getElementById('auditList');
         auditList.innerHTML = '';
 
-        // Dropped Summary Rows
+        // 1. CFO Red-Flags & Anomaly Detection Engine
+        const anomalies = audit.anomalies || [];
+        const anomalySummary = audit.anomaly_summary || {};
+        if (anomalies.length > 0) {
+            const card = document.createElement('div');
+            card.className = 'audit-card';
+            card.innerHTML = `
+                <div class="audit-card-header">
+                    <div class="audit-icon rose">🚨</div>
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <h3>CFO Red-Flags & Anomaly Detection (${anomalies.length} Flagged)</h3>
+                            <div style="display: flex; gap: 6px;">
+                                ${anomalySummary.critical_count > 0 ? `<span class="audit-item-badge" style="background: rgba(244,63,94,0.25); color: #fda4af;">${anomalySummary.critical_count} Critical</span>` : ''}
+                                ${anomalySummary.warning_count > 0 ? `<span class="audit-item-badge" style="background: rgba(245,158,11,0.25); color: #fde68a;">${anomalySummary.warning_count} Warning</span>` : ''}
+                                ${anomalySummary.info_count > 0 ? `<span class="audit-item-badge" style="background: rgba(56,189,248,0.25); color: #bae6fd;">${anomalySummary.info_count} Notice</span>` : ''}
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-400">Automated audit checks for margin leakage, duplicate transactions, and extreme typo outliers.</p>
+                    </div>
+                </div>
+            `;
+            anomalies.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'audit-item';
+                el.style.flexDirection = 'column';
+                el.style.alignItems = 'flex-start';
+                el.style.gap = '6px';
+
+                const badgeBg = item.severity === 'critical' ? 'rgba(244,63,94,0.2)' : (item.severity === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(56,189,248,0.2)');
+                const badgeColor = item.severity === 'critical' ? '#fda4af' : (item.severity === 'warning' ? '#fde68a' : '#bae6fd');
+
+                let sampleStr = '';
+                if (item.sample_rows && item.sample_rows.length > 0) {
+                    sampleStr = `<div style="font-size: 11px; font-family: monospace; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; width: 100%; overflow-x: auto;">Sample: ${JSON.stringify(item.sample_rows[0])}</div>`;
+                }
+
+                el.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+                        <span style="font-weight: 600; color: #e2e8f0;">[${escapeHtml(item.severity.toUpperCase())}] ${escapeHtml(item.title)}</span>
+                        <span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor};">${item.affected_count} record(s) affected</span>
+                    </div>
+                    <span style="font-size: 12px; color: var(--text-muted);">${escapeHtml(item.description)}</span>
+                    ${sampleStr}
+                `;
+                card.appendChild(el);
+            });
+            auditList.appendChild(card);
+        } else {
+            const card = document.createElement('div');
+            card.className = 'audit-card';
+            card.innerHTML = `
+                <div class="audit-card-header">
+                    <div class="audit-icon emerald">✓</div>
+                    <div>
+                        <h3>Clean Bill of Health: 0 Business Anomalies Detected</h3>
+                        <p class="text-xs text-slate-400">All records verified with positive unit margins, valid unique IDs, and within 3σ statistical variance.</p>
+                    </div>
+                </div>
+            `;
+            auditList.appendChild(card);
+        }
+
+        // 2. 1C & ERP Cross-Tab Matrix Flattener
+        const unpivot = audit.unpivoted_matrix;
+        if (unpivot && unpivot.is_unpivoted) {
+            const card = document.createElement('div');
+            card.className = 'audit-card';
+            card.innerHTML = `
+                <div class="audit-card-header">
+                    <div class="audit-icon indigo">🔄</div>
+                    <div>
+                        <h3>1C / ERP Cross-Tab Matrix Flattener Applied</h3>
+                        <p class="text-xs text-slate-400">Automatically unpivoted wide monthly columns into standardized time-series rows for Power BI time intelligence.</p>
+                    </div>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Temporal Columns Unpivoted:</strong> ${unpivot.temporal_columns.length} columns (${escapeHtml(unpivot.temporal_columns.slice(0, 4).join(', '))}${unpivot.temporal_columns.length > 4 ? '...' : ''})</span>
+                    <span class="audit-item-badge">pd.melt() + Table.Unpivot</span>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Pruned Summary Columns:</strong> ${escapeHtml(unpivot.pruned_summary_columns.join(', ') || 'None')}</span>
+                    <span class="audit-item-badge">Excluded from unpivot</span>
+                </div>
+                <div class="audit-item">
+                    <span><strong>Row Transformation:</strong> ${unpivot.original_rows} raw matrix rows → ${unpivot.unpivoted_rows} granular records</span>
+                    <span class="audit-item-badge">Standard Time Series</span>
+                </div>
+            `;
+            auditList.appendChild(card);
+        }
+
+        // 3. Dropped Summary Rows
         if (audit.dropped_rows && audit.dropped_rows.length > 0) {
             const card = document.createElement('div');
             card.className = 'audit-card';

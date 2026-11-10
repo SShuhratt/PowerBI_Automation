@@ -299,6 +299,115 @@ def test_google_sheets_connector():
     print("[PASS] test_google_sheets_connector (URL parsing, mock ingestion, and Web.Contents M generation)")
 
 
+def test_1c_crosstab_unpivoting():
+    """Verify 1C and ERP cross-tab monthly matrix detection, unpivoting, and summary pruning."""
+    import pandas as pd
+    client = app.test_client()
+
+    crosstab_df = pd.DataFrame({
+        "Номенклатура": ["Asus ZenBook 14", "Dell XPS 15", "Apple MacBook Air"],
+        "Склад": ["Ташкент", "Ташкент", "Самарканд"],
+        "Январь 2026": [12000, 18000, 15000],
+        "Февраль 2026": [14000, 19500, 16200],
+        "Март 2026": [16500, 21000, 17800],
+        "Итого": [42500, 58500, 49000]
+    })
+    # Add summary row
+    summary_row = pd.DataFrame([{
+        "Номенклатура": "Итого", "Склад": "Всего",
+        "Январь 2026": 45000, "Февраль 2026": 49700, "Март 2026": 55300, "Итого": 150000
+    }])
+    full_crosstab = pd.concat([crosstab_df, summary_row], ignore_index=True)
+
+    buf = io.BytesIO()
+    full_crosstab.to_excel(buf, index=False)
+    buf.seek(0)
+
+    data = {"file": (buf, "1C_Monthly_Matrix_Export.xlsx")}
+    res = client.post("/api/upload", data=data, content_type="multipart/form-data", headers=AUTH_HEADERS)
+    assert res.status_code == 200
+    result = res.get_json()
+    assert result["success"] is True
+
+    # Verify unpivot execution
+    unpivot = result["unpivoted_matrix"]
+    assert unpivot["is_unpivoted"] is True
+    assert len(unpivot["temporal_columns"]) == 3
+    assert "Итого" in unpivot["pruned_summary_columns"]
+    assert result["audit_log"]["cleaned_row_count"] == 9  # 3 products * 3 months
+
+    # Verify date and amount columns
+    cols = result["table_columns"]
+    assert "date" in cols
+    assert "amount" in cols
+    assert "period" in cols
+
+    # Verify Power BI model generator produced time intelligence for unpivoted date
+    dax_names = [m["name"] for m in result["dax_measures"]]
+    assert any("YTD" in n for n in dax_names)
+    assert any("YoY Growth" in n for n in dax_names)
+
+    print("[PASS] test_1c_crosstab_unpivoting (1C matrix detection, pd.melt flattener, and summary pruning)")
+
+
+def test_cfo_anomaly_detection_engine():
+    """Verify CFO red-flags engine for duplicate invoices, margin leakage, 3σ outliers, and Audit_Exceptions table in .pbip."""
+    import pandas as pd
+    client = app.test_client()
+
+    risky_sales = pd.DataFrame({
+        "order_id": [201, 202, 203, 203, 204, 205, 206],
+        "order_date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06"],
+        "category": ["Electronics", "Electronics", "Accessories", "Accessories", "Office", "Office", "Electronics"],
+        "unit_price": [120.0, 50.0, 30.0, 30.0, 15.0, 0.0, 95000.0],
+        "unit_cost": [80.0, 75.0, 20.0, 20.0, 10.0, 25.0, 110.0],  # 202: cost > price (leakage)
+        "units_sold": [2, 1, 4, 4, 3, 5, 1],
+        "total_revenue": [240.0, 50.0, 120.0, 120.0, 45.0, 0.0, 95000.0],
+        "profit": [80.0, -25.0, 40.0, 40.0, 15.0, -125.0, 94890.0]  # negative profit
+    })
+
+    buf = io.BytesIO()
+    risky_sales.to_csv(buf, index=False)
+    buf.seek(0)
+
+    data = {"file": (buf, "financial_risks_audit.csv")}
+    res = client.post("/api/upload", data=data, content_type="multipart/form-data", headers=AUTH_HEADERS)
+    assert res.status_code == 200
+    result = res.get_json()
+    assert result["success"] is True
+
+    # Verify CFO Anomaly Detection
+    summary = result["anomaly_summary"]
+    assert summary["has_critical"] is True
+    assert summary["critical_count"] >= 2
+    assert summary["total_flags"] >= 4
+
+    anomalies = result["anomalies"]
+    cats = [a["category"] for a in anomalies]
+    assert "duplicate_invoices" in cats
+    assert "margin_leakage" in cats
+    assert "negative_profit" in cats
+    assert "zero_price_freebie" in cats
+
+    # Verify Audit_Exceptions table injected in Power BI Project .pbip
+    session_id = result["session_id"]
+    dl_res = client.get(f"/api/download/{session_id}")
+    assert dl_res.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
+    model_bim = json.loads(zf.read("AutoBI_Project.SemanticModel/definition/model.bim").decode("utf-8"))
+    table_names = [t["name"] for t in model_bim["model"]["tables"]]
+    assert "Audit_Exceptions" in table_names
+
+    # Check Audit_Exceptions columns and partition
+    audit_table = [t for t in model_bim["model"]["tables"] if t["name"] == "Audit_Exceptions"][0]
+    col_names = [c["name"] for c in audit_table["columns"]]
+    assert "Exception_ID" in col_names
+    assert "Severity" in col_names
+    assert "Category" in col_names
+
+    print("[PASS] test_cfo_anomaly_detection_engine (Duplicate invoices, margin leakage, negative profit, and Audit_Exceptions table)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -309,4 +418,6 @@ if __name__ == "__main__":
     test_preview_and_purge()
     test_dim_date_and_time_intelligence()
     test_google_sheets_connector()
+    test_1c_crosstab_unpivoting()
+    test_cfo_anomaly_detection_engine()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

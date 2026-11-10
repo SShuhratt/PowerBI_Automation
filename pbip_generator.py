@@ -39,7 +39,8 @@ def generate_pbip_artifacts(
     table_name: str,
     measures: List[Dict[str, str]],
     m_script: str,
-    project_name: str = "AutoBI_Project"
+    project_name: str = "AutoBI_Project",
+    anomalies: List[Dict[str, Any]] = None
 ) -> Dict[str, str]:
     """
     Generates file contents for the complete Power BI Project (.pbip) directory tree.
@@ -247,6 +248,53 @@ def generate_pbip_artifacts(
             "toColumn": "Date",
             "crossFilteringBehavior": "oneDirection"
         })
+
+    # Add dedicated Audit_Exceptions table if business anomalies were flagged
+    if anomalies and len(anomalies) > 0:
+        audit_rows_m = []
+        for idx, a in enumerate(anomalies, 1):
+            sev = a.get("severity", "warning").capitalize()
+            cat = a.get("category", "General").replace("_", " ").title()
+            title = str(a.get("title", "")).replace('"', '""')
+            desc = str(a.get("description", "")).replace('"', '""')
+            cnt = int(a.get("affected_count", 1))
+            audit_rows_m.append(f'        {{{idx}, "{sev}", "{cat}", "{title}", "{desc}", {cnt}}}')
+
+        m_rows_joined = ",\n".join(audit_rows_m)
+        m_audit_expr = [
+            "let\n",
+            "    Source = #table(\n",
+            "        type table [Exception_ID = Int64.Type, Severity = text, Category = text, Title = text, Description = text, Affected_Rows = Int64.Type],\n",
+            "        {\n",
+            f"{m_rows_joined}\n",
+            "        }\n",
+            "    )\n",
+            "in\n",
+            "    Source\n"
+        ]
+
+        audit_table = {
+            "name": "Audit_Exceptions",
+            "columns": [
+                {"name": "Exception_ID", "dataType": "int64", "sourceColumn": "Exception_ID"},
+                {"name": "Severity", "dataType": "string", "sourceColumn": "Severity"},
+                {"name": "Category", "dataType": "string", "sourceColumn": "Category"},
+                {"name": "Title", "dataType": "string", "sourceColumn": "Title"},
+                {"name": "Description", "dataType": "string", "sourceColumn": "Description"},
+                {"name": "Affected_Rows", "dataType": "int64", "sourceColumn": "Affected_Rows"}
+            ],
+            "partitions": [
+                {
+                    "name": "Audit_Exceptions_Partition",
+                    "mode": "import",
+                    "source": {
+                        "type": "m",
+                        "expression": m_audit_expr
+                    }
+                }
+            ]
+        }
+        tables.append(audit_table)
 
     # 6. SemanticModel definition/model.bim
     model_bim = {
