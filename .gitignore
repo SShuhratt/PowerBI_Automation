@@ -27,6 +27,7 @@ oracle_vps*
 coolctl_config.json
 coolify_commands.md
 linux_antigravity_coolify_guide.md
+extra_features.md
 .sessions/
 *.db
 

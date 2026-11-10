@@ -44,6 +44,50 @@ class PowerBIModelGenerator:
                     return col
         return None
 
+    def find_date_col(self) -> str:
+        """Find the primary date column in the dataframe."""
+        for c in self.df.columns:
+            if pd.api.types.is_datetime64_any_dtype(self.df[c]):
+                return c
+        for cand in ["order_date", "trans_date", "transaction_date", "invoice_date", "sale_date", "date", "created_at", "hire_date", "period", "timestamp"]:
+            matched = self._find_col([cand])
+            if matched:
+                return matched
+        return None
+
+    def _generate_time_intelligence_measures(self, primary_measure_name: str, format_str: str = "$#,##0.00") -> List[Dict[str, str]]:
+        """Generate standard Power BI time-intelligence DAX measures referencing Dim_Date."""
+        date_col = self.find_date_col()
+        if not date_col:
+            return []
+
+        return [
+            {
+                "name": f"{primary_measure_name} YTD",
+                "dax": f"{primary_measure_name} YTD = TOTALYTD([{primary_measure_name}], 'Dim_Date'[Date])",
+                "format": format_str,
+                "description": f"Cumulative year-to-date {primary_measure_name.lower()} against calendar year."
+            },
+            {
+                "name": f"{primary_measure_name} Prior Year",
+                "dax": f"{primary_measure_name} Prior Year = CALCULATE([{primary_measure_name}], SAMEPERIODLASTYEAR('Dim_Date'[Date]))",
+                "format": format_str,
+                "description": f"{primary_measure_name} for the corresponding historical period in the previous year."
+            },
+            {
+                "name": f"{primary_measure_name} YoY Growth %",
+                "dax": f"{primary_measure_name} YoY Growth % = DIVIDE([{primary_measure_name}] - [{primary_measure_name} Prior Year], [{primary_measure_name} Prior Year], 0)",
+                "format": "0.0%",
+                "description": f"Percentage year-over-year growth comparing current vs prior year {primary_measure_name.lower()}."
+            },
+            {
+                "name": f"{primary_measure_name} MTD",
+                "dax": f"{primary_measure_name} MTD = TOTALMTD([{primary_measure_name}], 'Dim_Date'[Date])",
+                "format": format_str,
+                "description": f"Cumulative month-to-date {primary_measure_name.lower()} against calendar month."
+            }
+        ]
+
     def generate_dax_measures(self) -> List[Dict[str, str]]:
         """Generate domain-specific DAX business measures."""
         cols = list(self.df.columns)
@@ -64,6 +108,23 @@ class PowerBIModelGenerator:
         # If no domain-specific measures were triggered, provide fallback statistical measures
         if not measures:
             measures.extend(self._generate_generic_measures(cols))
+
+        # Check if a date column exists to generate Time Intelligence measures
+        date_col = self.find_date_col()
+        if date_col:
+            primary_name = None
+            primary_format = "$#,##0.00"
+            for m in measures:
+                if any(k in m["name"] for k in ["Revenue", "Sales", "Spend", "Conversions", "Headcount", "Payroll", "Units", "Value", "Income"]):
+                    primary_name = m["name"]
+                    primary_format = m.get("format", "$#,##0.00")
+                    break
+            if not primary_name and measures:
+                primary_name = measures[0]["name"]
+                primary_format = measures[0].get("format", "#,##0.00")
+
+            if primary_name:
+                measures.extend(self._generate_time_intelligence_measures(primary_name, primary_format))
 
         return measures
 
@@ -470,8 +531,13 @@ class PowerBIModelGenerator:
 
         m_types_str = "{" + ", ".join(col_types) + "}"
 
+        if self.csv_path.startswith("http://") or self.csv_path.startswith("https://"):
+            source_expr = f'Web.Contents("{self.csv_path}")'
+        else:
+            source_expr = f'File.Contents("{self.csv_path}")'
+
         m_code = f"""let
-    Source = Csv.Document(File.Contents("{self.csv_path}"), [Delimiter=",", Columns={len(self.df.columns)}, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+    Source = Csv.Document({source_expr}, [Delimiter=",", Columns={len(self.df.columns)}, Encoding=65001, QuoteStyle=QuoteStyle.None]),
     #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
     #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers", {m_types_str})
 in

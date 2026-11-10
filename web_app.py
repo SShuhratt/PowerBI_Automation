@@ -22,6 +22,7 @@ from domain_classifier import DomainClassifier, DOMAINS
 from session_store import sessions
 from dashboard_preview import generate_html_dashboard
 from pbip_generator import generate_pbip_artifacts
+from google_sheets import fetch_google_sheets_csv, extract_google_sheets_csv_url
 
 import numpy as np
 import math
@@ -159,14 +160,18 @@ def build_analysis_payload(
     cleaner: SelfHealingCleaner,
     df: pd.DataFrame,
     filename: str,
-    domain_override: Optional[str] = None
+    domain_override: Optional[str] = None,
+    source_csv_path: Optional[str] = None,
+    is_live_url: bool = False
 ) -> dict:
     """Run semantic modeling, compute domain-specific KPIs/charts, and prepare session artifacts."""
     prune_old_sessions()
     session_id = str(uuid.uuid4())
 
+    csv_path_for_model = source_csv_path if (source_csv_path and (source_csv_path.startswith("http://") or source_csv_path.startswith("https://"))) else "cleaned_data.csv"
+
     # 1. Domain Classification & Model Generation
-    model_gen = PowerBIModelGenerator(df, csv_path="cleaned_data.csv", domain=domain_override)
+    model_gen = PowerBIModelGenerator(df, csv_path=csv_path_for_model, domain=domain_override)
     domain_key = model_gen.domain
     domain_info = model_gen.domain_info
     measures = model_gen.generate_dax_measures()
@@ -496,12 +501,16 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         "filename": filename,
         "dashboard_html": dashboard_html,
         "pbip_files": pbip_files,
+        "is_live_url": is_live_url,
+        "source_url": source_csv_path if is_live_url else None,
     })
 
     payload = {
         "success": True,
         "session_id": session_id,
         "filename": filename,
+        "is_live_url": is_live_url,
+        "source_url": source_csv_path if is_live_url else None,
         "domain": {
             "key": domain_key,
             "label": domain_info.get("label", domain_key),
@@ -599,6 +608,39 @@ def upload_file():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/ingest-url", methods=["POST"])
+@require_auth
+def ingest_google_sheet_url():
+    """Ingest a live Google Sheets URL, clean it, and build the Power BI model with live refresh."""
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+    domain_override = data.get("domain")
+
+    if not url:
+        return jsonify({"success": False, "error": "Please provide a valid Google Sheets URL."}), 400
+
+    try:
+        file_buffer, filename, csv_export_url = fetch_google_sheets_csv(url)
+        cleaner = SelfHealingCleaner(file_buffer, filename=filename)
+        df_clean = cleaner.clean()
+
+        result = build_analysis_payload(
+            cleaner,
+            df_clean,
+            filename,
+            domain_override=domain_override,
+            source_csv_path=csv_export_url,
+            is_live_url=True
+        )
+        return jsonify(result)
+    except PermissionError as e:
+        return jsonify({"success": False, "error": str(e)}), 403
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to ingest Google Sheet: {str(e)}"}), 500
 
 
 @app.route("/api/sheets", methods=["POST"])

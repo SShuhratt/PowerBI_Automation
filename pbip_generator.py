@@ -9,17 +9,29 @@ import pandas as pd
 from typing import List, Dict, Any
 
 
-def get_tmsl_data_type(dtype) -> str:
+def get_tmsl_data_type(dtype, col_name: str = "") -> str:
     s = str(dtype).lower()
-    if "int" in s:
+    c = str(col_name).lower()
+    if "datetime" in s or "date" in s or (c and any(k in c for k in ["order_date", "trans_date", "transaction_date", "invoice_date", "hire_date", "created_at"])):
+        return "dateTime"
+    elif "int" in s:
         return "int64"
     elif "float" in s or "double" in s or "decimal" in s:
         return "double"
-    elif "datetime" in s or "date" in s:
-        return "dateTime"
     elif "bool" in s:
         return "boolean"
     return "string"
+
+
+def find_primary_date_column(df: pd.DataFrame) -> str:
+    for c in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[c]):
+            return c
+    for c in df.columns:
+        cl = str(c).lower()
+        if any(k in cl for k in ["order_date", "trans_date", "transaction_date", "invoice_date", "sale_date", "date", "created_at", "hire_date", "period", "timestamp"]):
+            return c
+    return None
 
 
 def generate_pbip_artifacts(
@@ -60,13 +72,15 @@ def generate_pbip_artifacts(
     # 3. Columns mapping for model.bim
     columns_tmsl = []
     for col in df.columns:
-        dt = get_tmsl_data_type(df[col].dtype)
+        dt = get_tmsl_data_type(df[col].dtype, col)
         col_def: Dict[str, Any] = {
             "name": str(col),
             "dataType": dt,
             "sourceColumn": str(col)
         }
-        if dt == "double" and any(k in col.lower() for k in ["price", "rev", "cost", "margin", "profit", "amount", "salary", "spend", "rate"]):
+        if dt == "dateTime":
+            col_def["formatString"] = "yyyy-mm-dd"
+        elif dt == "double" and any(k in col.lower() for k in ["price", "rev", "cost", "margin", "profit", "amount", "salary", "spend", "rate"]):
             col_def["formatString"] = "$#,##0.00"
         elif dt == "int64":
             col_def["formatString"] = "#,##0"
@@ -94,7 +108,147 @@ def generate_pbip_artifacts(
     # Format M script lines as array of strings
     m_lines = [line + "\n" for line in m_script.strip().split("\n")]
 
-    # 5. SemanticModel definition/model.bim
+    # 5. Tables & Relationships (including Dim_Date Calendar table if dates detected)
+    tables = [
+        {
+            "name": table_name,
+            "columns": columns_tmsl,
+            "partitions": [
+                {
+                    "name": f"Partition_{table_name}",
+                    "mode": "import",
+                    "source": {
+                        "type": "m",
+                        "expression": m_lines
+                    }
+                }
+            ],
+            "measures": measures_tmsl
+        }
+    ]
+    relationships = []
+
+    date_col = find_primary_date_column(df)
+    if date_col:
+        min_year = 2024
+        max_year = 2026
+        try:
+            dt_series = pd.to_datetime(df[date_col], errors="coerce").dropna()
+            if not dt_series.empty:
+                min_year = int(dt_series.min().year)
+                max_year = int(dt_series.max().year)
+        except Exception:
+            pass
+
+        if max_year < min_year:
+            max_year = min_year
+        if min_year == max_year:
+            max_year = min_year + 1
+
+        dim_date_table = {
+            "name": "Dim_Date",
+            "dataCategory": "Time",
+            "columns": [
+                {
+                    "name": "Date",
+                    "dataType": "dateTime",
+                    "isKey": True,
+                    "sourceColumn": "[Date]",
+                    "formatString": "yyyy-mm-dd"
+                },
+                {
+                    "name": "Year",
+                    "dataType": "int64",
+                    "sourceColumn": "[Year]",
+                    "formatString": "0"
+                },
+                {
+                    "name": "Quarter",
+                    "dataType": "string",
+                    "sourceColumn": "[Quarter]"
+                },
+                {
+                    "name": "Month Number",
+                    "dataType": "int64",
+                    "sourceColumn": "[Month Number]",
+                    "formatString": "0"
+                },
+                {
+                    "name": "Month",
+                    "dataType": "string",
+                    "sourceColumn": "[Month]",
+                    "sortByColumn": "Month Number"
+                },
+                {
+                    "name": "Month Year",
+                    "dataType": "string",
+                    "sourceColumn": "[Month Year]"
+                },
+                {
+                    "name": "Day of Month",
+                    "dataType": "int64",
+                    "sourceColumn": "[Day of Month]",
+                    "formatString": "0"
+                },
+                {
+                    "name": "Day of Week",
+                    "dataType": "int64",
+                    "sourceColumn": "[Day of Week]",
+                    "formatString": "0"
+                },
+                {
+                    "name": "Day Name",
+                    "dataType": "string",
+                    "sourceColumn": "[Day Name]"
+                },
+                {
+                    "name": "Is Weekend",
+                    "dataType": "string",
+                    "sourceColumn": "[Is Weekend]"
+                }
+            ],
+            "partitions": [
+                {
+                    "name": "Dim_Date_Partition",
+                    "mode": "import",
+                    "source": {
+                        "type": "calculated",
+                        "expression": [
+                            "ADDCOLUMNS(",
+                            f"    CALENDAR(DATE({min_year}, 1, 1), DATE({max_year}, 12, 31)),",
+                            "    \"Year\", YEAR([Date]),",
+                            "    \"Quarter\", \"Q\" & FORMAT([Date], \"Q\"),",
+                            "    \"Month Number\", MONTH([Date]),",
+                            "    \"Month\", FORMAT([Date], \"mmmm\"),",
+                            "    \"Month Year\", FORMAT([Date], \"mmm yyyy\"),",
+                            "    \"Day of Month\", DAY([Date]),",
+                            "    \"Day of Week\", WEEKDAY([Date], 2),",
+                            "    \"Day Name\", FORMAT([Date], \"dddd\"),",
+                            "    \"Is Weekend\", IF(WEEKDAY([Date], 2) >= 6, \"Yes\", \"No\")",
+                            ")"
+                        ]
+                    }
+                }
+            ]
+        }
+        tables.append(dim_date_table)
+
+        # Mark date_col as dateTime for TMSL relationship integrity
+        for c in columns_tmsl:
+            if c["name"] == str(date_col):
+                c["dataType"] = "dateTime"
+                c["formatString"] = "yyyy-mm-dd"
+
+        relationships.append({
+            "name": f"Rel_{table_name}_{date_col}_DimDate",
+            "fromTable": table_name,
+            "fromColumn": str(date_col),
+            "toTable": "Dim_Date",
+            "toColumn": "Date",
+            "crossFilteringBehavior": "oneDirection"
+        })
+
+    # 6. SemanticModel definition/model.bim
     model_bim = {
         "name": f"{table_name}_Model",
         "compatibilityLevel": 1550,
@@ -105,23 +259,8 @@ def generate_pbip_artifacts(
                 "returnErrorValuesAsNull": True
             },
             "defaultPowerBIDataSourceVersion": "powerBI_V3",
-            "tables": [
-                {
-                    "name": table_name,
-                    "columns": columns_tmsl,
-                    "partitions": [
-                        {
-                            "name": f"Partition_{table_name}",
-                            "mode": "import",
-                            "source": {
-                                "type": "m",
-                                "expression": m_lines
-                            }
-                        }
-                    ],
-                    "measures": measures_tmsl
-                }
-            ]
+            "tables": tables,
+            "relationships": relationships
         }
     }
 
@@ -152,3 +291,4 @@ def generate_pbip_artifacts(
     }
 
     return artifacts
+

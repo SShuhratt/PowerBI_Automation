@@ -61,6 +61,16 @@
 
         <!-- Upload Card -->
         <div id="uploadCard" class="upload-card">
+            <!-- Ingestion Mode Tabs -->
+            <div class="upload-mode-tabs" style="display: flex; gap: 8px; margin-bottom: 20px;">
+                <button type="button" id="tabModeFile" class="tab-btn active" style="padding: 8px 16px; font-size: 13px;">
+                    📁 Upload File (.xlsx, .csv)
+                </button>
+                <button type="button" id="tabModeGSheets" class="tab-btn" style="padding: 8px 16px; font-size: 13px;">
+                    🌐 Google Sheets (Live Refresh)
+                </button>
+            </div>
+
             <div id="dropzone" class="dropzone">
                 <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" style="display: none;">
                 <div class="dropzone-icon">📁</div>
@@ -71,6 +81,26 @@
                 <div class="dropzone-actions">
                     <button type="button" id="browseBtn" class="btn btn-primary">Browse Files</button>
                     <button type="button" id="sampleBtn" class="btn btn-secondary">⚡ Try Demo Sample (Sales)</button>
+                </div>
+            </div>
+
+            <!-- Google Sheets URL Form (Hidden by default) -->
+            <div id="gsheetsSection" style="display: none; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 32px 24px; text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 12px;">🌐</div>
+                <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 6px;">
+                    Connect Live Google Sheet
+                </h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px; max-width: 540px; margin-left: auto; margin-right: auto;">
+                    Paste your public Google Sheets link. AutoBI cleans it and creates a Power BI model configured with live 1-click cloud refresh.
+                </p>
+                <form id="gsheetsForm" style="display: flex; gap: 10px; max-width: 640px; margin: 0 auto; flex-wrap: wrap;">
+                    <input type="url" id="gsheetsUrlInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" required style="flex: 1; min-width: 280px; background: rgba(10, 15, 30, 0.8); border: 1px solid var(--border-active); border-radius: var(--radius-sm); padding: 12px 16px; color: #fff; font-size: 14px; outline: none;">
+                    <button type="submit" id="gsheetsSubmitBtn" class="btn btn-primary" style="padding: 12px 24px;">
+                        ⚡ Ingest & Model
+                    </button>
+                </form>
+                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 14px;">
+                    ℹ️ Sharing setting must be set to <em>"Anyone with the link can view"</em>.
                 </div>
             </div>
 

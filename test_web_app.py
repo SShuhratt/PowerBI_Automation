@@ -231,6 +231,74 @@ def test_preview_and_purge():
     print("[PASS] test_preview_and_purge (Executive Preview + Data Purge)")
 
 
+def test_dim_date_and_time_intelligence():
+    """Verify automated Dim_Date generation, relationships, and Time Intelligence DAX."""
+    client = app.test_client()
+    sample_res = client.post("/api/sample", headers=AUTH_HEADERS)
+    assert sample_res.status_code == 200
+    data = sample_res.get_json()
+    dax_names = [m["name"] for m in data["dax_measures"]]
+
+    # Verify Time Intelligence measures
+    assert any("YTD" in n for n in dax_names)
+    assert any("Prior Year" in n for n in dax_names)
+    assert any("YoY Growth %" in n for n in dax_names)
+    assert any("MTD" in n for n in dax_names)
+
+    # Verify model.bim contains Dim_Date and Relationship
+    session_id = data["session_id"]
+    dl_res = client.get(f"/api/download/{session_id}")
+    zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
+    model_bim = json.loads(zf.read("AutoBI_Project.SemanticModel/definition/model.bim").decode("utf-8"))
+    table_names = [t["name"] for t in model_bim["model"]["tables"]]
+    assert "Dim_Date" in table_names
+    assert len(model_bim["model"].get("relationships", [])) >= 1
+    rel = model_bim["model"]["relationships"][0]
+    assert rel["toTable"] == "Dim_Date"
+    assert rel["toColumn"] == "Date"
+    print("[PASS] test_dim_date_and_time_intelligence (Dim_Date, 1-to-many relationship, and YTD/YoY DAX)")
+
+
+def test_google_sheets_connector():
+    """Verify Google Sheets URL parsing and /api/ingest-url endpoint."""
+    from google_sheets import extract_google_sheets_csv_url
+    from unittest.mock import patch
+
+    # 1. Test URL extractor with various formats
+    test_urls = [
+        "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?usp=sharing",
+        "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit#gid=12345",
+        "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+    ]
+    for u in test_urls:
+        csv_url = extract_google_sheets_csv_url(u)
+        assert "export?format=csv" in csv_url
+        assert "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms" in csv_url
+
+    # 2. Test /api/ingest-url input validation
+    client = app.test_client()
+    bad_req = client.post("/api/ingest-url", json={"url": "not-a-sheet-url"}, headers=AUTH_HEADERS)
+    assert bad_req.status_code == 400
+
+    # 3. Test /api/ingest-url with mock fetch
+    mock_csv = "order_id,order_date,units_sold,unit_price,total_revenue,status\n101,2026-01-10,5,20,100,Completed\nTotal,2026-01-10,5,20,100,\n"
+    with patch("web_app.fetch_google_sheets_csv") as mock_fetch:
+        mock_fetch.return_value = (
+            io.BytesIO(mock_csv.encode("utf-8")),
+            "google_sheet_1BxiMVs0XRA5.csv",
+            "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5/export?format=csv&gid=0"
+        )
+        res = client.post("/api/ingest-url", json={"url": test_urls[0]}, headers=AUTH_HEADERS)
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["success"] is True
+        assert data["is_live_url"] is True
+        assert "Web.Contents" in data["power_query_m"]
+        assert data["audit_log"]["cleaned_row_count"] == 1
+
+    print("[PASS] test_google_sheets_connector (URL parsing, mock ingestion, and Web.Contents M generation)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -239,4 +307,6 @@ if __name__ == "__main__":
     test_session_persistence()
     test_multi_sheet_and_encoding()
     test_preview_and_purge()
+    test_dim_date_and_time_intelligence()
+    test_google_sheets_connector()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

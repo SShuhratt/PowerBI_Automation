@@ -30,6 +30,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const userStatusBadge = document.getElementById('userStatusBadge');
     const userEmailSpan = document.getElementById('userEmailSpan');
     const logoutBtn = document.getElementById('logoutBtn');
+    const tabModeFile = document.getElementById('tabModeFile');
+    const tabModeGSheets = document.getElementById('tabModeGSheets');
+    const gsheetsSection = document.getElementById('gsheetsSection');
+    const gsheetsForm = document.getElementById('gsheetsForm');
+    const gsheetsUrlInput = document.getElementById('gsheetsUrlInput');
 
     // Check workspace authentication status
     async function checkAuthStatus() {
@@ -111,6 +116,52 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSessionId = null;
     let currentLastFile = null;
     let currentLastDomain = 'sales';
+
+    // Ingestion Mode Toggles (File vs Google Sheets)
+    if (tabModeFile && tabModeGSheets && dropzone && gsheetsSection) {
+        tabModeFile.addEventListener('click', () => {
+            tabModeFile.classList.add('active');
+            tabModeGSheets.classList.remove('active');
+            dropzone.style.display = 'flex';
+            gsheetsSection.style.display = 'none';
+        });
+
+        tabModeGSheets.addEventListener('click', () => {
+            tabModeGSheets.classList.add('active');
+            tabModeFile.classList.remove('active');
+            dropzone.style.display = 'none';
+            gsheetsSection.style.display = 'block';
+        });
+    }
+
+    if (gsheetsForm) {
+        gsheetsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = gsheetsUrlInput ? gsheetsUrlInput.value.trim() : '';
+            if (!url) return;
+
+            showLoading('Connecting and analyzing Google Sheet...');
+            try {
+                const res = await fetch('/api/ingest-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    renderResults(data);
+                } else {
+                    alert('Google Sheets Error: ' + (data.error || 'Failed to ingest sheet.'));
+                    uploadCard.style.display = 'block';
+                }
+            } catch (err) {
+                alert('Connection Error: ' + err.message);
+                uploadCard.style.display = 'block';
+            } finally {
+                hideLoading();
+            }
+        });
+    }
 
     // --- Drag and Drop Events ---
     if (dropzone) {
@@ -269,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Render Results ---
     function renderResults(data) {
         currentSessionId = data.session_id;
-        activeFileBadge.textContent = data.filename;
+        activeFileBadge.textContent = data.is_live_url ? `${data.filename} 🌐 (Live Google Sheet)` : data.filename;
 
         // 1. Domain Badge & Switcher
         const dom = data.domain;
@@ -374,6 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
             resultsContainer.style.display = 'none';
             uploadCard.style.display = 'block';
             fileInput.value = '';
+            if (gsheetsUrlInput) gsheetsUrlInput.value = '';
             currentLastFile = null;
         };
     }
