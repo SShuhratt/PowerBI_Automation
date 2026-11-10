@@ -5,6 +5,17 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Utility: XSS prevention
+    function escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
     // DOM Elements
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
@@ -143,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (tgConnectedUserBanner) {
                     tgConnectedUserBanner.style.display = 'block';
-                    tgConnectedUserBanner.innerHTML = `✓ Connected: <b>${connectedUserLabel}</b>. Report will be delivered to your Telegram chat!`;
+                    tgConnectedUserBanner.innerHTML = `✓ Connected: <b>${escapeHtml(connectedUserLabel)}</b>. Report will be delivered to your Telegram chat!`;
                 }
                 if (tgPollTimer) {
                     clearInterval(tgPollTimer);

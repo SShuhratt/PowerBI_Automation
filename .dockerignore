@@ -8,3 +8,21 @@ __pycache__
 output/
 test_*.py
 .system_generated
+
+# Secrets, SSH & Environment files
+.ssh/
+*.pub
+oracle_vps*
+.env*
+*.env
+.coolify.env
+coolctl_config.json
+coolctl.py
+coolify_commands.md
+linux_antigravity_coolify_guide.md
+extra_features.md
+.sessions/
+*.db
+scratch/
+*.md
+!README.md

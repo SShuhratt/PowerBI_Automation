@@ -6,6 +6,7 @@ double-click and open immediately in any browser without Power BI installed.
 
 import os
 import json
+import html
 import pandas as pd
 
 
@@ -20,8 +21,9 @@ def generate_html_dashboard(
     fx_info: dict = None,
     pareto_info: dict = None
 ) -> str:
-    domain_label = domain_info.get("label", "Business Analytics")
-    domain_icon = domain_info.get("icon", "📊")
+    domain_label = html.escape(str(domain_info.get("label", "Business Analytics")))
+    domain_icon = html.escape(str(domain_info.get("icon", "📊")))
+    safe_filename = html.escape(str(filename))
     anomalies = anomalies or []
     anomaly_summary = anomaly_summary or {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False}
     fx_info = fx_info or {}
@@ -30,14 +32,14 @@ def generate_html_dashboard(
     # Multi-currency banner HTML
     fx_banner_html = ""
     if fx_info.get("is_multi_currency"):
-        rates_str = ", ".join([f"{c}: {r:,.1f} UZS" for c, r in fx_info.get("rates_applied", {}).items() if c != "UZS"])
+        rates_str = ", ".join([f"{html.escape(str(c))}: {r:,.1f} UZS" for c, r in fx_info.get("rates_applied", {}).items() if c != "UZS"])
         fx_banner_html = f"""
         <div class="glass-card rounded-xl px-4 py-3 border border-indigo-500/30 bg-indigo-500/5 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div class="flex items-center gap-2 text-indigo-300">
                 <span class="text-base">💱</span>
-                <span><strong>Multi-Currency FX Normalization:</strong> Converted ({', '.join(fx_info.get('detected_currencies', []))}) via <strong>CBU.uz</strong> official rates ({rates_str}).</span>
+                <span><strong>Multi-Currency FX Normalization:</strong> Converted ({', '.join([html.escape(str(c)) for c in fx_info.get('detected_currencies', [])])}) via <strong>CBU.uz</strong> official rates ({rates_str}).</span>
             </div>
-            <span class="px-2.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[11px]">CBU Date: {fx_info.get('cbu_date', 'Today')}</span>
+            <span class="px-2.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[11px]">CBU Date: {html.escape(str(fx_info.get('cbu_date', 'Today')))}</span>
         </div>
         """
 
@@ -48,7 +50,7 @@ def generate_html_dashboard(
         <div class="glass-card rounded-xl px-4 py-3 border border-amber-500/30 bg-amber-500/5 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div class="flex items-center gap-2 text-amber-300">
                 <span class="text-base">🎯</span>
-                <span><strong>Pareto (80/20) Segmentation:</strong> <strong>{pareto_info.get('class_a_count', 0)}</strong> Class A {pareto_info.get('dimension_col', 'items')} generate <strong>{pareto_info.get('class_a_revenue_share', 0)}%</strong> of total volume.</span>
+                <span><strong>Pareto (80/20) Segmentation:</strong> <strong>{pareto_info.get('class_a_count', 0)}</strong> Class A {html.escape(str(pareto_info.get('dimension_col', 'items')))} generate <strong>{pareto_info.get('class_a_revenue_share', 0)}%</strong> of total volume.</span>
             </div>
             <div class="flex items-center gap-2 font-mono text-[11px]">
                 <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Class A: {pareto_info.get('class_a_revenue_share', 0)}%</span>
@@ -81,16 +83,18 @@ def generate_html_dashboard(
         for a in anomalies:
             sev = a.get("severity", "warning")
             badge_color = "rose" if sev == "critical" else ("amber" if sev == "warning" else "sky")
+            safe_title = html.escape(str(a.get('title', '')))
+            safe_desc = html.escape(str(a.get('description', '')))
             alerts_html += f"""
                 <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition space-y-2">
                     <div class="flex items-center justify-between">
                         <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-{badge_color}-500/20 text-{badge_color}-400 border border-{badge_color}-500/30">
-                            {sev.upper()}
+                            {html.escape(sev.upper())}
                         </span>
-                        <span class="text-xs font-mono text-slate-400">{a.get('affected_count', 1)} record(s)</span>
+                        <span class="text-xs font-mono text-slate-400">{int(a.get('affected_count', 1))} record(s)</span>
                     </div>
-                    <div class="text-sm font-semibold text-slate-200">{a.get('title', '')}</div>
-                    <p class="text-xs text-slate-400 leading-relaxed">{a.get('description', '')}</p>
+                    <div class="text-sm font-semibold text-slate-200">{safe_title}</div>
+                    <p class="text-xs text-slate-400 leading-relaxed">{safe_desc}</p>
                 </div>
             """
         alerts_html += """
@@ -111,29 +115,32 @@ def generate_html_dashboard(
     # Format KPI cards HTML
     kpis_html = ""
     for k in kpis:
+        safe_k_label = html.escape(str(k.get('label', '')))
+        safe_k_value = html.escape(str(k.get('value', '')))
+        safe_k_sub = html.escape(str(k.get('sub', '')))
         kpis_html += f"""
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition">
-            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">{k.get('label', '')}</div>
-            <div class="text-2xl font-bold text-slate-900 mb-1">{k.get('value', '')}</div>
-            <div class="text-xs text-slate-400">{k.get('sub', '')}</div>
+            <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">{safe_k_label}</div>
+            <div class="text-2xl font-bold text-slate-900 mb-1">{safe_k_value}</div>
+            <div class="text-xs text-slate-400">{safe_k_sub}</div>
         </div>
         """
 
     # Format Table records
-    table_headers_html = "".join([f'<th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">{c}</th>' for c in df.columns[:10]])
+    table_headers_html = "".join([f'<th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">{html.escape(str(c))}</th>' for c in df.columns[:10]])
     table_rows_html = ""
     for _, row in df.head(50).iterrows():
-        cells = "".join([f'<td class="px-4 py-2.5 text-sm text-slate-700 whitespace-nowrap">{str(row[c]) if pd.notna(row[c]) else ""}</td>' for c in df.columns[:10]])
+        cells = "".join([f'<td class="px-4 py-2.5 text-sm text-slate-700 whitespace-nowrap">{html.escape(str(row[c])) if pd.notna(row[c]) else ""}</td>' for c in df.columns[:10]])
         table_rows_html += f'<tr class="border-b border-slate-100 hover:bg-slate-50 transition">{cells}</tr>'
 
-    charts_json = json.dumps(charts or {}, ensure_ascii=False)
+    charts_json = json.dumps(charts or {}, ensure_ascii=False).replace("</", "<\\/")
 
-    html = f"""<!DOCTYPE html>
+    html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoBI Executive Dashboard — {filename}</title>
+    <title>AutoBI Executive Dashboard — {safe_filename}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -151,7 +158,7 @@ def generate_html_dashboard(
                     <span class="text-3xl">{domain_icon}</span>
                     <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">{domain_label} Executive Overview</h1>
                 </div>
-                <p class="text-slate-400 text-sm mt-1">Generated by AutoBI Studio from <span class="text-indigo-400 font-semibold">{filename}</span></p>
+                <p class="text-slate-400 text-sm mt-1">Generated by AutoBI Studio from <span class="text-indigo-400 font-semibold">{safe_filename}</span></p>
             </div>
             <div class="flex items-center gap-3">
                 <span class="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full text-xs font-semibold flex items-center gap-1.5">
@@ -175,9 +182,9 @@ def generate_html_dashboard(
             <!-- Dynamic KPIs -->
             {''.join([f'''
             <div class="glass-card rounded-xl p-4 hover:border-indigo-500/30 transition">
-                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">{k.get('label', '')}</div>
-                <div class="text-xl md:text-2xl font-bold text-white mb-1">{k.get('value', '')}</div>
-                <div class="text-[11px] text-slate-500">{k.get('sub', '')}</div>
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">{html.escape(str(k.get('label', '')))}</div>
+                <div class="text-xl md:text-2xl font-bold text-white mb-1">{html.escape(str(k.get('value', '')))}</div>
+                <div class="text-[11px] text-slate-500">{html.escape(str(k.get('sub', '')))}</div>
             </div>
             ''' for k in kpis])}
         </section>
@@ -285,4 +292,4 @@ def generate_html_dashboard(
 </body>
 </html>
 """
-    return html
+    return html_content

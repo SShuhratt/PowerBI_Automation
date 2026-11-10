@@ -290,6 +290,16 @@ def resolve_target_to_chat(target: str, db_path: Optional[str] = None) -> Tuple[
     return clean, clean, None
 
 
+BOT_TOKEN_REGEX = re.compile(r"^\d{8,12}:[A-Za-z0-9_-]{30,50}$")
+
+
+def validate_bot_token(token: Optional[str]) -> bool:
+    """Validates Telegram Bot Token format to prevent SSRF and URL injection."""
+    if not token or not isinstance(token, str):
+        return False
+    return bool(BOT_TOKEN_REGEX.match(token.strip()))
+
+
 def get_default_telegram_config() -> Tuple[Optional[str], Optional[str]]:
     """Retrieves default bot token and chat ID from environment variables or local env files."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -417,6 +427,8 @@ def send_telegram_message(
     timeout: int = 10
 ) -> Dict[str, Any]:
     """Sends an HTML formatted message via Telegram Bot API."""
+    if not validate_bot_token(bot_token):
+        raise ValueError("Invalid Telegram Bot Token format.")
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -454,6 +466,8 @@ def send_telegram_document(
     timeout: int = 20
 ) -> Dict[str, Any]:
     """Uploads a standalone document (interactive HTML report) via multipart form-data."""
+    if not validate_bot_token(bot_token):
+        raise ValueError("Invalid Telegram Bot Token format.")
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
     boundary = "----WebKitFormBoundaryAutoBITelegram7MA4YW"
 

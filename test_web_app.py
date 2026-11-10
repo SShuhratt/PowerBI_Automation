@@ -90,7 +90,9 @@ def test_api_sample():
 
     # Verify Download Zip for this session
     session_id = data["session_id"]
-    dl_res = client.get(f"/api/download/{session_id}")
+    # Unauthenticated download is blocked
+    assert client.get(f"/api/download/{session_id}").status_code == 401
+    dl_res = client.get(f"/api/download/{session_id}", headers=AUTH_HEADERS)
     assert dl_res.status_code == 200
     assert dl_res.mimetype == "application/zip"
 
@@ -152,7 +154,7 @@ def test_session_persistence():
     
     # Test client download route using the persisted session
     client = app.test_client()
-    dl_res = client.get(f"/api/download/{test_id}")
+    dl_res = client.get(f"/api/download/{test_id}", headers=AUTH_HEADERS)
     assert dl_res.status_code == 200
     assert dl_res.mimetype == "application/zip"
     
@@ -217,8 +219,9 @@ def test_preview_and_purge():
     assert b"AutoBI Executive Dashboard" in prev_res.data
     assert b"chart.js" in prev_res.data.lower()
 
-    # 2. Test Explicit Purge endpoint
-    purge_res = client.post(f"/api/purge/{session_id}")
+    # 2. Test Explicit Purge endpoint (unauth blocked, auth succeeds)
+    assert client.post(f"/api/purge/{session_id}").status_code == 401
+    purge_res = client.post(f"/api/purge/{session_id}", headers=AUTH_HEADERS)
     assert purge_res.status_code == 200
     purge_data = purge_res.get_json()
     assert purge_data["success"] is True
@@ -227,7 +230,7 @@ def test_preview_and_purge():
     prev_again = client.get(f"/api/preview/{session_id}")
     assert prev_again.status_code == 404
 
-    dl_again = client.get(f"/api/download/{session_id}")
+    dl_again = client.get(f"/api/download/{session_id}", headers=AUTH_HEADERS)
     assert dl_again.status_code == 404
     print("[PASS] test_preview_and_purge (Executive Preview + Data Purge)")
 
@@ -248,7 +251,7 @@ def test_dim_date_and_time_intelligence():
 
     # Verify model.bim contains Dim_Date and Relationship
     session_id = data["session_id"]
-    dl_res = client.get(f"/api/download/{session_id}")
+    dl_res = client.get(f"/api/download/{session_id}", headers=AUTH_HEADERS)
     zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
     model_bim = json.loads(zf.read("AutoBI_Project.SemanticModel/definition/model.bim").decode("utf-8"))
     table_names = [t["name"] for t in model_bim["model"]["tables"]]
@@ -392,7 +395,7 @@ def test_cfo_anomaly_detection_engine():
 
     # Verify Audit_Exceptions table injected in Power BI Project .pbip
     session_id = result["session_id"]
-    dl_res = client.get(f"/api/download/{session_id}")
+    dl_res = client.get(f"/api/download/{session_id}", headers=AUTH_HEADERS)
     assert dl_res.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
     model_bim = json.loads(zf.read("AutoBI_Project.SemanticModel/definition/model.bim").decode("utf-8"))
@@ -447,7 +450,7 @@ def test_cbu_fx_normalization():
 
     # Verify Currency_Selector table in model.bim
     session_id = result["session_id"]
-    dl_res = client.get(f"/api/download/{session_id}")
+    dl_res = client.get(f"/api/download/{session_id}", headers=AUTH_HEADERS)
     assert dl_res.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(dl_res.data))
     model_bim = json.loads(zf.read("AutoBI_Project.SemanticModel/definition/model.bim").decode("utf-8"))
@@ -575,19 +578,21 @@ def test_telegram_executive_dispatcher():
         assert mock_doc.call_args[1]["chat_id"] == "@board_directors"
 
     # 7. Deep linking auto-detect polling test
+    import uuid
     from telegram_client import upsert_subscriber
-    poll_unfound = client.get("/api/telegram/poll-connection?code=test_code_99", headers=AUTH_HEADERS)
+    unique_code = f"code_{uuid.uuid4().hex[:8]}"
+    poll_unfound = client.get(f"/api/telegram/poll-connection?code={unique_code}", headers=AUTH_HEADERS)
     assert poll_unfound.status_code == 200
     assert poll_unfound.get_json()["connected"] is False
 
-    # Simulate user tapping Start on Telegram bot with parameter 'test_code_99'
+    # Simulate user tapping Start on Telegram bot with parameter unique_code
     upsert_subscriber({
         "chat_id": 77665544,
         "username": "executive_director",
         "first_name": "Executive",
-        "last_start_param": "test_code_99"
+        "last_start_param": unique_code
     })
-    poll_found = client.get("/api/telegram/poll-connection?code=test_code_99", headers=AUTH_HEADERS)
+    poll_found = client.get(f"/api/telegram/poll-connection?code={unique_code}", headers=AUTH_HEADERS)
     assert poll_found.status_code == 200
     assert poll_found.get_json()["connected"] is True
     assert poll_found.get_json()["chat_id"] == 77665544
@@ -625,6 +630,94 @@ def test_telegram_executive_dispatcher():
     print("[PASS] test_telegram_executive_dispatcher (Config, 1-click deep link polling, multi-recipient dispatch, and URL resolution)")
 
 
+def test_cybersecurity_and_hardening():
+    """Verify security controls: view-only shared link isolation, cookie HMAC signing, rate-limiting, CSV injection defense, SSRF validation, and security headers."""
+    import pandas as pd
+    from web_app import sign_auth_token, verify_auth_token, sanitize_df_for_csv_export, FAILED_LOGINS
+    from telegram_client import send_telegram_message
+
+    client = app.test_client()
+
+    # 1. View-Only Shared Link vs Operational Action Restrictions
+    sample_res = client.post("/api/sample", headers=AUTH_HEADERS)
+    assert sample_res.status_code == 200
+    session_id = sample_res.get_json()["session_id"]
+
+    # Shared link preview is accessible without authentication (view-only)
+    preview_res = client.get(f"/api/preview/{session_id}")
+    assert preview_res.status_code == 200
+    assert "text/html" in preview_res.content_type
+
+    # All operational actions MUST fail without authentication (401 Unauthorized)
+    assert client.get(f"/api/download/{session_id}").status_code == 401
+    assert client.post(f"/api/purge/{session_id}").status_code == 401
+    assert client.post("/api/sheets").status_code == 401
+    assert client.post("/api/upload").status_code == 401
+    assert client.post("/api/telegram/dispatch", json={"session_id": session_id}).status_code == 401
+
+    # 2. Cryptographic Cookie Tampering Defense
+    # Unsigned/tampered cookie must be rejected
+    client.set_cookie("autobi_user", "ceo@enterprise.com")
+    status_tampered = client.get("/api/auth/status")
+    assert status_tampered.get_json()["authenticated"] is False
+
+    # Signed cookie must succeed
+    signed_token = sign_auth_token("cfo@enterprise.com")
+    client.set_cookie("autobi_user", signed_token)
+    status_signed = client.get("/api/auth/status")
+    assert status_signed.get_json()["authenticated"] is True
+    assert status_signed.get_json()["user"] == "cfo@enterprise.com"
+
+    # Clear cookie for subsequent checks
+    client.set_cookie("autobi_user", "")
+
+    # 3. Login Brute-Force Rate Limiter (5 attempts per IP)
+    test_ip = "198.51.100.42"
+    FAILED_LOGINS[test_ip] = []
+    for _ in range(5):
+        client.post("/api/auth/login", json={"passcode": "wrong_guess"}, environ_overrides={"REMOTE_ADDR": test_ip})
+
+    rate_limited_res = client.post("/api/auth/login", json={"passcode": "autobi2026"}, environ_overrides={"REMOTE_ADDR": test_ip})
+    assert rate_limited_res.status_code == 429
+    assert "Too many failed login attempts" in rate_limited_res.get_json()["error"]
+    del FAILED_LOGINS[test_ip]
+
+    # 4. CSV Formula / DDE Injection Sanitization
+    malicious_df = pd.DataFrame({
+        "item": ["=CMD|' /C calc'!A0", "+100", "-50.25", "@SUM(1,2)", "Normal Product", "\t=MALICIOUS()"],
+        "price": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    })
+    safe_df = sanitize_df_for_csv_export(malicious_df)
+    items = list(safe_df["item"])
+    assert items[0] == "'=CMD|' /C calc'!A0"
+    assert items[1] == "+100"       # Pure number string is untouched
+    assert items[2] == "-50.25"     # Pure negative number is untouched
+    assert items[3] == "'@SUM(1,2)"
+    assert items[4] == "Normal Product"
+    assert items[5] == "'\t=MALICIOUS()"
+
+    # 5. Security Headers
+    headers_res = client.get("/")
+    assert headers_res.headers.get("X-Content-Type-Options") == "nosniff"
+    assert headers_res.headers.get("X-Frame-Options") == "SAMEORIGIN"
+    assert headers_res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+    assert "Content-Security-Policy" in headers_res.headers
+
+    # 6. Telegram Bot Token SSRF Validation
+    try:
+        send_telegram_message("Test", chat_id="123456", bot_token="http://attacker.com/leak")
+        assert False, "Should have raised ValueError on malicious bot_token SSRF attempt"
+    except ValueError as e:
+        assert "Invalid Telegram Bot Token format" in str(e)
+
+    # 7. Telegram Connection Code Enforcement
+    no_code_poll = client.get("/api/telegram/poll-connection", headers=AUTH_HEADERS)
+    assert no_code_poll.status_code == 400
+    assert "Connection code required" in no_code_poll.get_json()["error"]
+
+    print("[PASS] test_cybersecurity_and_hardening (View-only shared link, HMAC cookie signing, login rate limiter, DDE sanitization, SSRF guard, security headers)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -640,4 +733,5 @@ if __name__ == "__main__":
     test_cbu_fx_normalization()
     test_pareto_abc_segmentation()
     test_telegram_executive_dispatcher()
+    test_cybersecurity_and_hardening()
     print("\nALL WEB PORTAL TESTS PASSED SUCCESSFULLY! [OK]")

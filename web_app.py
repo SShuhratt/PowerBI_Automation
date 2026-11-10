@@ -10,6 +10,9 @@ import io
 import uuid
 import json
 import zipfile
+import time
+import hmac
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 import functools
@@ -35,17 +38,72 @@ app.json.sort_keys = False
 WORKSPACE_PASSCODE = os.environ.get("WORKSPACE_PASSCODE", "autobi2026")
 AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# Cryptographic token signing key
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = hashlib.sha256(f"autobi_secure_salt_{WORKSPACE_PASSCODE}".encode()).hexdigest()
+
+# In-memory IP rate limiter for login attempts (max 5 failed attempts per 15 min)
+FAILED_LOGINS = {}
+
+def check_login_rate_limit(ip: str) -> bool:
+    """Returns True if the IP is allowed to attempt login, False if rate-limited."""
+    now = time.time()
+    attempts = [t for t in FAILED_LOGINS.get(ip, []) if now - t < 900]
+    FAILED_LOGINS[ip] = attempts
+    return len(attempts) < 5
+
+def record_failed_login(ip: str):
+    now = time.time()
+    attempts = [t for t in FAILED_LOGINS.get(ip, []) if now - t < 900]
+    attempts.append(now)
+    FAILED_LOGINS[ip] = attempts
+
+def reset_failed_logins(ip: str):
+    if ip in FAILED_LOGINS:
+        del FAILED_LOGINS[ip]
+
+def sign_auth_token(email: str, ttl_days: int = 30) -> str:
+    """Generates a cryptographically signed HMAC-SHA256 token: email|expires_at|signature."""
+    exp = int(time.time()) + (ttl_days * 86400)
+    payload = f"{email}|{exp}"
+    sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}|{sig}"
+
+def verify_auth_token(token: str) -> Optional[str]:
+    """Validates the HMAC-SHA256 signature and expiration; returns email if valid."""
+    if not token or not isinstance(token, str):
+        return None
+    parts = token.split("|")
+    if len(parts) != 3:
+        return None
+    email, exp_str, sig = parts
+    try:
+        exp = int(exp_str)
+        if time.time() > exp:
+            return None
+    except ValueError:
+        return None
+
+    payload = f"{email}|{exp_str}"
+    expected_sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(sig, expected_sig):
+        return email
+    return None
 
 def get_current_user():
     if not AUTH_ENABLED:
         return "pilot@autobi.local"
-    # 1. Check HTTP-only cookie
+    # 1. Check cryptographically signed HTTP-only cookie
     user_cookie = request.cookies.get("autobi_user")
     if user_cookie:
-        return user_cookie
-    # 2. Check X-Workspace-Key header (for automated scripts / API tests)
+        verified_email = verify_auth_token(user_cookie)
+        if verified_email:
+            return verified_email
+
+    # 2. Check X-Workspace-Key header with constant-time comparison (for tests/APIs)
     key_header = request.headers.get("X-Workspace-Key")
-    if key_header == WORKSPACE_PASSCODE:
+    if key_header and hmac.compare_digest(key_header, WORKSPACE_PASSCODE):
         return "api-client@autobi.local"
     return None
 
@@ -64,6 +122,26 @@ def require_auth(f):
             }), 401
         return f(*args, **kwargs)
     return decorated
+
+
+def sanitize_df_for_csv_export(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prevents CSV Formula / DDE Injection.
+    Any text cell starting with '=', '+', '-', '@', '\t', '\r' is escaped with a single quote.
+    """
+    df_safe = df.copy()
+    for col in df_safe.columns:
+        if df_safe[col].dtype == object or isinstance(df_safe[col].dtype, pd.StringDtype):
+            def escape_formula(val):
+                if isinstance(val, str) and val and val[0] in ('=', '+', '-', '@', '\t', '\r'):
+                    try:
+                        float(val)
+                        return val
+                    except ValueError:
+                        return f"'{val}"
+                return val
+            df_safe[col] = df_safe[col].map(escape_formula)
+    return df_safe
 
 
 def sanitize_for_json(obj):
@@ -203,9 +281,9 @@ def build_analysis_payload(
         dax_lines.append(f"{m['dax']}\n")
     dax_file_content = "\n".join(dax_lines)
 
-    # 4. Cleaned CSV in-memory
+    # 4. Cleaned CSV in-memory (with DDE formula injection sanitization)
     csv_buffer = io.StringIO()
-    df.to_csv(csv_buffer, index=False)
+    sanitize_df_for_csv_export(df).to_csv(csv_buffer, index=False)
     cleaned_csv_str = csv_buffer.getvalue()
 
     # 5. Readme
@@ -588,19 +666,29 @@ def auth_status():
 
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():
+    client_ip = request.remote_addr or "127.0.0.1"
+    if not check_login_rate_limit(client_ip):
+        return jsonify({
+            "success": False,
+            "error": "Too many failed login attempts. Please wait 15 minutes before trying again."
+        }), 429
+
     data = request.get_json(silent=True) or {}
     passcode = data.get("passcode", "").strip()
     email = data.get("email", "").strip() or "analyst@enterprise.local"
 
-    if not passcode or passcode != WORKSPACE_PASSCODE:
+    if not passcode or not hmac.compare_digest(passcode, WORKSPACE_PASSCODE):
+        record_failed_login(client_ip)
         return jsonify({"success": False, "error": "Invalid workspace access passcode."}), 401
 
+    reset_failed_logins(client_ip)
+    signed_token = sign_auth_token(email)
     res = jsonify({
         "success": True,
         "message": "Workspace successfully authenticated.",
         "user": email
     })
-    res.set_cookie("autobi_user", email, max_age=30 * 86400, httponly=True, samesite="Lax")
+    res.set_cookie("autobi_user", signed_token, max_age=30 * 86400, httponly=True, samesite="Lax")
     return res
 
 
@@ -677,6 +765,7 @@ def ingest_google_sheet_url():
 
 
 @app.route("/api/sheets", methods=["POST"])
+@require_auth
 def inspect_file_sheets():
     """Returns sheet names in an Excel file so users can choose which tab to analyze."""
     if "file" not in request.files:
@@ -719,7 +808,7 @@ def run_sample():
 
 @app.route("/api/preview/<session_id>")
 def preview_dashboard(session_id: str):
-    """Serve standalone interactive HTML executive dashboard."""
+    """Serve standalone interactive HTML executive dashboard (view-only shared link)."""
     session = sessions.get(session_id)
     if not session or not session.get("dashboard_html"):
         return jsonify({"error": "Session expired or preview unavailable. Please re-run analysis."}), 404
@@ -729,8 +818,8 @@ def preview_dashboard(session_id: str):
 @app.route("/api/telegram/config", methods=["GET"])
 @require_auth
 def telegram_config():
-    """Returns whether Telegram Bot credentials are configured and lists recent subscribers."""
-    from telegram_client import get_default_telegram_config, get_bot_username, get_recent_subscribers, poll_and_sync_updates
+    """Returns whether Telegram Bot credentials are configured."""
+    from telegram_client import get_default_telegram_config, get_bot_username, poll_and_sync_updates
     token, chat_id = get_default_telegram_config()
     username = get_bot_username() if token else None
 
@@ -741,15 +830,13 @@ def telegram_config():
         except Exception:
             pass
 
-    recents = get_recent_subscribers(limit=5) if token else []
-
     return jsonify({
         "configured": bool(token and chat_id),
         "has_token": bool(token),
         "bot_username": username,
         "chat_id_configured": bool(chat_id),
         "default_chat_id": (chat_id[:4] + "..." + chat_id[-4:]) if chat_id and len(chat_id) > 8 else chat_id,
-        "recent_subscribers": recents
+        "recent_subscribers": []
     })
 
 
@@ -757,38 +844,27 @@ def telegram_config():
 @require_auth
 def telegram_poll_connection():
     """Poll Telegram Bot API for incoming /start messages with a matching connection code."""
-    from telegram_client import poll_and_sync_updates, get_subscriber_by_param, get_recent_subscribers
+    from telegram_client import poll_and_sync_updates, get_subscriber_by_param
     code = request.args.get("code", "").strip()
+    if not code:
+        return jsonify({"connected": False, "error": "Connection code required."}), 400
 
     try:
         poll_and_sync_updates()
     except Exception:
         pass
 
-    if code:
-        sub = get_subscriber_by_param(code)
-        if sub:
-            uname = sub.get("username")
-            fn = sub.get("first_name")
-            label = f"{fn} (@{uname})" if (fn and uname) else (f"@{uname}" if uname else (fn or f"Chat {sub['chat_id']}"))
-            return jsonify({
-                "connected": True,
-                "chat_id": sub["chat_id"],
-                "username": uname,
-                "first_name": fn,
-                "label": label
-            })
-
-    # Fallback to subscriber active in the last 60 seconds
-    recents = get_recent_subscribers(limit=1)
-    if recents and (time.time() - recents[0].get("updated_at", 0)) < 60:
-        r = recents[0]
+    sub = get_subscriber_by_param(code)
+    if sub:
+        uname = sub.get("username")
+        fn = sub.get("first_name")
+        label = f"{fn} (@{uname})" if (fn and uname) else (f"@{uname}" if uname else (fn or f"Chat {sub['chat_id']}"))
         return jsonify({
             "connected": True,
-            "chat_id": r["chat_id"],
-            "username": r.get("username"),
-            "first_name": r.get("first_name"),
-            "label": r.get("label", str(r["chat_id"]))
+            "chat_id": sub["chat_id"],
+            "username": uname,
+            "first_name": fn,
+            "label": label
         })
 
     return jsonify({"connected": False})
@@ -822,6 +898,7 @@ def telegram_dispatch():
 
 
 @app.route("/api/purge/<session_id>", methods=["POST", "DELETE"])
+@require_auth
 def purge_session(session_id: str):
     """Explicit data privacy purge: permanently wipes session from server RAM and disk."""
     success = sessions.delete(session_id)
@@ -832,6 +909,7 @@ def purge_session(session_id: str):
 
 
 @app.route("/api/download/<session_id>")
+@require_auth
 def download_pack(session_id: str):
     session = sessions.get(session_id)
     if not session:
@@ -878,6 +956,24 @@ pause
         as_attachment=True,
         download_name=download_filename
     )
+
+
+@app.after_request
+def add_security_headers(response):
+    """Add defensive security headers to all HTTP responses."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self';"
+    )
+    return response
 
 
 if __name__ == "__main__":

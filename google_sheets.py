@@ -50,7 +50,10 @@ def fetch_google_sheets_csv(url_or_id: str, timeout: int = 15) -> Tuple[io.Bytes
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            data = response.read()
+            max_bytes = 32 * 1024 * 1024  # 32MB max limit
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ValueError("Google Sheet exceeds the 32MB maximum download limit.")
             # If Google redirects to an HTML login page, it's not public
             if b"<html" in data[:400].lower() and (b"google" in data[:400].lower() or b"sign in" in data[:400].lower()):
                 raise PermissionError("The Google Sheet is private. Please set link sharing to 'Anyone with the link can view'.")

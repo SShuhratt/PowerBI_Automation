@@ -116,7 +116,7 @@ def test_api_multi_domain_presets():
 
         # Check download for each domain
         sid = data["session_id"]
-        dl = client.get(f"/api/download/{sid}")
+        dl = client.get(f"/api/download/{sid}", headers=headers)
         assert dl.status_code == 200
         assert dl.mimetype == "application/zip"
 

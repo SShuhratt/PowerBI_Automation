@@ -303,7 +303,7 @@ def test_api_sample_all_domains():
 
         # Verify download pack
         session_id = data["session_id"]
-        dl_res = client.get(f"/api/download/{session_id}")
+        dl_res = client.get(f"/api/download/{session_id}", headers=headers)
         assert dl_res.status_code == 200
         assert dl_res.mimetype == "application/zip"
 
