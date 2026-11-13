@@ -18,6 +18,7 @@ from typing import Optional
 import functools
 import pandas as pd
 from flask import Flask, request, jsonify, render_template, send_file
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from cleaner import SelfHealingCleaner
 from pbi_model import PowerBIModelGenerator
@@ -31,6 +32,7 @@ import numpy as np
 import math
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB max upload
 app.json.sort_keys = False
 
@@ -62,6 +64,22 @@ def record_failed_login(ip: str):
 def reset_failed_logins(ip: str):
     if ip in FAILED_LOGINS:
         del FAILED_LOGINS[ip]
+
+
+def get_client_ip() -> str:
+    """Extract real client IP when running behind Cloudflare and Coolify Traefik."""
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote_addr or "127.0.0.1"
+
+
+def _is_https_request() -> bool:
+    """Return True if the request arrived over HTTPS (directly or via Cloudflare/Traefik)."""
+    return request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
 
 def sign_auth_token(email: str, ttl_days: int = 30) -> str:
     """Generates a cryptographically signed HMAC-SHA256 token: email|expires_at|signature."""
@@ -666,7 +684,7 @@ def auth_status():
 
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():
-    client_ip = request.remote_addr or "127.0.0.1"
+    client_ip = get_client_ip()
     if not check_login_rate_limit(client_ip):
         return jsonify({
             "success": False,
@@ -688,14 +706,28 @@ def auth_login():
         "message": "Workspace successfully authenticated.",
         "user": email
     })
-    res.set_cookie("autobi_user", signed_token, max_age=30 * 86400, httponly=True, samesite="Lax")
+    res.set_cookie(
+        "autobi_user",
+        signed_token,
+        max_age=30 * 86400,
+        httponly=True,
+        samesite="Lax",
+        secure=_is_https_request(),
+    )
     return res
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def auth_logout():
     res = jsonify({"success": True, "message": "Logged out of workspace."})
-    res.set_cookie("autobi_user", "", max_age=0, httponly=True, samesite="Lax")
+    res.set_cookie(
+        "autobi_user",
+        "",
+        max_age=0,
+        httponly=True,
+        samesite="Lax",
+        secure=_is_https_request(),
+    )
     return res
 
 

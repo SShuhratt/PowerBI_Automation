@@ -682,6 +682,38 @@ def test_cybersecurity_and_hardening():
     assert "Too many failed login attempts" in rate_limited_res.get_json()["error"]
     del FAILED_LOGINS[test_ip]
 
+    # 3b. Cloudflare CF-Connecting-IP isolation & HTTPS Secure cookie flag
+    proxy_ip = "10.0.1.5"
+    FAILED_LOGINS.pop("203.0.113.10", None)
+    FAILED_LOGINS.pop("203.0.113.11", None)
+    for _ in range(5):
+        client.post(
+            "/api/auth/login",
+            json={"passcode": "wrong_guess"},
+            headers={"CF-Connecting-IP": "203.0.113.10"},
+            environ_overrides={"REMOTE_ADDR": proxy_ip},
+        )
+    assert client.post(
+        "/api/auth/login",
+        json={"passcode": "autobi2026"},
+        headers={"CF-Connecting-IP": "203.0.113.10"},
+        environ_overrides={"REMOTE_ADDR": proxy_ip},
+    ).status_code == 429
+
+    # Different client behind the same reverse proxy must NOT be locked out
+    https_login = client.post(
+        "/api/auth/login",
+        json={"passcode": "autobi2026"},
+        headers={"CF-Connecting-IP": "203.0.113.11", "X-Forwarded-Proto": "https"},
+        environ_overrides={"REMOTE_ADDR": proxy_ip},
+    )
+    assert https_login.status_code == 200
+    set_cookie_hdr = https_login.headers.get("Set-Cookie", "")
+    assert "Secure" in set_cookie_hdr
+    assert "HttpOnly" in set_cookie_hdr
+    FAILED_LOGINS.pop("203.0.113.10", None)
+    client.set_cookie("autobi_user", "")
+
     # 4. CSV Formula / DDE Injection Sanitization
     malicious_df = pd.DataFrame({
         "item": ["=CMD|' /C calc'!A0", "+100", "-50.25", "@SUM(1,2)", "Normal Product", "\t=MALICIOUS()"],
