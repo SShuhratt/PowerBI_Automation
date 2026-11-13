@@ -18,6 +18,8 @@ oracle_vps*
 .coolify.env
 coolctl_config.json
 coolctl.py
+cfctl.py
+*.zone
 coolify_commands.md
 linux_antigravity_coolify_guide.md
 extra_features.md

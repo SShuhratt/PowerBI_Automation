@@ -133,6 +133,26 @@ def cmd_logs(args):
         print(f"[!] Failed to fetch logs: {e}")
 
 
+def cmd_domain(args):
+    app_uuid = args.uuid or CONFIG.get("app_uuid")
+    if not app_uuid:
+        print("[!] Error: No application UUID specified.")
+        return
+    if args.domain_action == "show":
+        app = api_request(f"/api/v1/applications/{app_uuid}")
+        if app:
+            print(f"[*] Current FQDN for {app_uuid}: {app.get('fqdn')}")
+    elif args.domain_action == "set":
+        res = api_request(
+            f"/api/v1/applications/{app_uuid}",
+            method="PATCH",
+            data={"domains": args.domains},
+        )
+        if res:
+            print(f"[+] Updated Coolify domains to: {args.domains}")
+            print("[*] Run `python coolctl.py deploy` if Traefik needs to reload the new domain routes.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Antigravity Coolify Controller (coolctl)")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -151,6 +171,15 @@ def main():
     logs_parser = subparsers.add_parser("logs", help="Stream container logs")
     logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show")
 
+    # Domain
+    domain_parser = subparsers.add_parser("domain", help="Show or update application FQDN/domains")
+    domain_sub = domain_parser.add_subparsers(dest="domain_action", required=True)
+    dom_show = domain_sub.add_parser("show", help="Show current domain(s)")
+    dom_show.add_argument("--uuid", default=None)
+    dom_set = domain_sub.add_parser("set", help="Set comma-separated domain URLs (e.g. https://autobi.uz,https://www.autobi.uz)")
+    dom_set.add_argument("domains")
+    dom_set.add_argument("--uuid", default=None)
+
     args = parser.parse_args()
     if not args.command or args.command == "status":
         cmd_status(args)
@@ -160,6 +189,8 @@ def main():
         cmd_server(args)
     elif args.command == "logs":
         cmd_logs(args)
+    elif args.command == "domain":
+        cmd_domain(args)
     else:
         parser.print_help()
 

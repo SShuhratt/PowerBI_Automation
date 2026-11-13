@@ -32,6 +32,7 @@ coolctl_config.json
 
 .sessions/
 *.db
+*.zone
 
 
 
