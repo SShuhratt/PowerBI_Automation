@@ -55,7 +55,21 @@ def test_index_route():
     assert b"dropzone" in res.data
     assert b"Zero-Persistence Guarantee" in res.data
     assert b"Download Power BI Starter Kit" in res.data
+    assert b"/privacy" in res.data
+    assert b"/terms" in res.data
+    assert b"support@autobi.uz" in res.data
     print("[PASS] test_index_route")
+
+
+def test_legal_pages():
+    client = app.test_client()
+    for path, expected_heading in [("/privacy", b"Privacy Policy"), ("/terms", b"Terms of Service")]:
+        res = client.get(path)
+        assert res.status_code == 200, f"Expected 200 on {path}, got {res.status_code}"
+        assert expected_heading in res.data
+        assert b"support@autobi.uz" in res.data
+        assert b"7,200 seconds" in res.data or b"2 hours" in res.data
+    print("[PASS] test_legal_pages (/privacy & /terms)")
 
 
 def test_api_sample():
@@ -753,6 +767,7 @@ def test_cybersecurity_and_hardening():
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
+    test_legal_pages()
     test_api_sample()
     test_api_upload_csv()
     test_session_persistence()

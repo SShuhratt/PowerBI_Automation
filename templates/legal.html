@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} — AutoBI Studio</title>
+    <meta name="description" content="{{ meta_description }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <a href="{{ url_for('index') }}" class="brand-group legal-brand-link">
+                <div class="brand-logo">BI</div>
+                <div class="brand-meta">
+                    <h1>AutoBI Studio</h1>
+                    <p>Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
+                </div>
+            </a>
+            <div class="header-badges">
+                <a href="{{ url_for('index') }}" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px; text-decoration: none;">
+                    &larr; Back to Studio
+                </a>
+            </div>
+        </header>
+
+        <article class="legal-card">
+            <div class="legal-header">
+                <span class="badge badge-emerald">Effective Date: {{ effective_date }}</span>
+                <h2 class="legal-title">{{ heading }}</h2>
+                <p class="legal-lead">{{ lead }}</p>
+                <div class="legal-switcher">
+                    <a href="{{ url_for('privacy_policy') }}" class="legal-tab {% if doc_type == 'privacy' %}active{% endif %}">Privacy Policy</a>
+                    <a href="{{ url_for('terms_of_service') }}" class="legal-tab {% if doc_type == 'terms' %}active{% endif %}">Terms of Service</a>
+                </div>
+            </div>
+
+            <div class="legal-body">
+                {% for section in sections %}
+                <section class="legal-section">
+                    <h3>{{ section.title }}</h3>
+                    {% for para in section.paragraphs %}
+                    <p>{{ para }}</p>
+                    {% endfor %}
+                    {% if section.bullets %}
+                    <ul>
+                        {% for bullet in section.bullets %}
+                        <li>{{ bullet }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </section>
+                {% endfor %}
+            </div>
+
+            <div class="legal-contact-box">
+                <div>
+                    <strong>Questions or data requests?</strong>
+                    <span>Contact the AutoBI Studio team directly at <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>.</span>
+                </div>
+                <a href="{{ url_for('index') }}" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; text-decoration: none;">Open AutoBI Studio</a>
+            </div>
+        </article>
+
+        <footer class="site-footer">
+            <span>AutoBI Studio &middot; Automated Power BI &amp; Executive Analytics</span>
+            <span class="site-footer-sep">&middot;</span>
+            <a href="{{ url_for('privacy_policy') }}" class="support-link">Privacy Policy</a>
+            <span class="site-footer-sep">&middot;</span>
+            <a href="{{ url_for('terms_of_service') }}" class="support-link">Terms of Service</a>
+            <span class="site-footer-sep">&middot;</span>
+            <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>
+        </footer>
+    </div>
+</body>
+</html>
