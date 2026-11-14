@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang or 'en' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,28 +20,33 @@
 <body>
     <div class="app-container">
         <header class="app-header">
-            <a href="{{ url_for('index') }}" class="brand-group legal-brand-link">
+            <a href="{{ url_for('index', lang=lang) }}" class="brand-group legal-brand-link">
                 <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img" width="44" height="44">
                 <div class="brand-meta">
                     <h1>AutoBI Studio</h1>
-                    <p>Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
+                    <p>{{ legal_ui.brand_tagline }}</p>
                 </div>
             </a>
             <div class="header-badges">
-                <a href="{{ url_for('index') }}" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px; text-decoration: none;">
-                    &larr; Back to Studio
+                <div class="lang-switcher" role="group" aria-label="Language selector">
+                    {% for code in supported_langs %}
+                    <a href="{{ url_for('privacy_policy' if doc_type == 'privacy' else 'terms_of_service', lang=code) }}" class="lang-btn {% if lang == code %}active{% endif %}" data-lang="{{ code }}">{{ code.upper() }}</a>
+                    {% endfor %}
+                </div>
+                <a href="{{ url_for('index', lang=lang) }}" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px; text-decoration: none;">
+                    {{ legal_ui.back_to_studio }}
                 </a>
             </div>
         </header>
 
         <article class="legal-card">
             <div class="legal-header">
-                <span class="badge badge-emerald">Effective Date: {{ effective_date }}</span>
+                <span class="badge badge-emerald">{{ legal_ui.effective_label }}: {{ effective_date }}</span>
                 <h2 class="legal-title">{{ heading }}</h2>
                 <p class="legal-lead">{{ lead }}</p>
                 <div class="legal-switcher">
-                    <a href="{{ url_for('privacy_policy') }}" class="legal-tab {% if doc_type == 'privacy' %}active{% endif %}">Privacy Policy</a>
-                    <a href="{{ url_for('terms_of_service') }}" class="legal-tab {% if doc_type == 'terms' %}active{% endif %}">Terms of Service</a>
+                    <a href="{{ url_for('privacy_policy', lang=lang) }}" class="legal-tab {% if doc_type == 'privacy' %}active{% endif %}">{{ legal_ui.privacy_tab }}</a>
+                    <a href="{{ url_for('terms_of_service', lang=lang) }}" class="legal-tab {% if doc_type == 'terms' %}active{% endif %}">{{ legal_ui.terms_tab }}</a>
                 </div>
             </div>
 
@@ -65,19 +70,19 @@
 
             <div class="legal-contact-box">
                 <div>
-                    <strong>Questions or data requests?</strong>
-                    <span>Contact the AutoBI Studio team directly at <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>.</span>
+                    <strong>{{ legal_ui.questions_heading }}</strong>
+                    <span>{{ legal_ui.questions_body }} <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>.</span>
                 </div>
-                <a href="{{ url_for('index') }}" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; text-decoration: none;">Open AutoBI Studio</a>
+                <a href="{{ url_for('index', lang=lang) }}" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; text-decoration: none;">{{ legal_ui.open_studio }}</a>
             </div>
         </article>
 
         <footer class="site-footer">
-            <span>AutoBI Studio &middot; Automated Power BI &amp; Executive Analytics</span>
+            <span>{{ legal_ui.footer_tagline }}</span>
             <span class="site-footer-sep">&middot;</span>
-            <a href="{{ url_for('privacy_policy') }}" class="support-link">Privacy Policy</a>
+            <a href="{{ url_for('privacy_policy', lang=lang) }}" class="support-link">{{ legal_ui.privacy_tab }}</a>
             <span class="site-footer-sep">&middot;</span>
-            <a href="{{ url_for('terms_of_service') }}" class="support-link">Terms of Service</a>
+            <a href="{{ url_for('terms_of_service', lang=lang) }}" class="support-link">{{ legal_ui.terms_tab }}</a>
             <span class="site-footer-sep">&middot;</span>
             <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>
         </footer>

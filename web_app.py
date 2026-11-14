@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import functools
 import pandas as pd
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, make_response
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from cleaner import SelfHealingCleaner
@@ -27,6 +27,7 @@ from session_store import sessions
 from dashboard_preview import generate_html_dashboard
 from pbip_generator import generate_pbip_artifacts
 from google_sheets import fetch_google_sheets_csv, extract_google_sheets_csv_url
+from i18n_translations import LEGAL_DOCUMENTS, LEGAL_UI, SUPPORTED_LANGS, normalize_lang, resolve_lang
 
 import numpy as np
 import math
@@ -667,140 +668,51 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
     return sanitize_for_json(payload)
 
 
-LEGAL_DOCUMENTS = {
-    "privacy": {
-        "doc_type": "privacy",
-        "page_title": "Privacy Policy",
-        "meta_description": "How AutoBI Studio handles uploaded spreadsheets, temporary sessions, cookies, and optional integrations.",
-        "effective_date": "November 15, 2026",
-        "heading": "Privacy Policy",
-        "lead": "How AutoBI Studio collects, temporarily processes, protects, and purges data when you use autobi.uz.",
-        "sections": [
-            {
-                "title": "1. Information You Provide",
-                "paragraphs": [
-                    "AutoBI Studio processes spreadsheets (.csv, .xlsx, .xls, up to 32 MB) and public Google Sheets URLs that you voluntarily submit for cleaning, modeling, and Power BI export.",
-                ],
-                "bullets": [
-                    "Workspace sign-in: When workspace authentication is used, we record your entered work email inside a cryptographically signed HTTP-only cookie (autobi_user, SameSite=Lax, Secure over HTTPS, up to 30 days) so your authenticated session persists across browser refreshes.",
-                    "Support inquiries: Emails sent to support@autobi.uz are forwarded via Cloudflare Email Routing and answered using our configured mail relay (Brevo) solely to respond to your request.",
-                    "Optional Telegram dispatch: If you trigger a Telegram Executive Digest, we process only the bot connection state or recipient usernames/links you supply for that delivery.",
-                ],
-            },
-            {
-                "title": "2. Ephemeral Session Storage & Data Retention",
-                "paragraphs": [
-                    "We do not sell your datasets, and we do not use your spreadsheets to train AI or machine-learning models.",
-                    "To support multi-worker dashboard previews, .zip/.pbip downloads, and optional Telegram report delivery, processed session artifacts are held temporarily in the server's ephemeral session store (SQLite WAL or configured Redis) for up to 2 hours (7,200 seconds) and automatically pruned upon expiry.",
-                ],
-                "bullets": [
-                    "Immediate user purge: You can permanently erase your session dataset and generated artifacts from server storage at any time using the Purge button (/api/purge/<session_id>).",
-                    "Local sign-out: Clicking Sign Out immediately expires the autobi_user authentication cookie.",
-                ],
-            },
-            {
-                "title": "3. Third-Party Services & Infrastructure",
-                "paragraphs": [
-                    "Depending on the features you invoke, requests interact with limited infrastructure or user-initiated integrations:",
-                ],
-                "bullets": [
-                    "Cloudflare: Provides DNS, TLS encryption, reverse-proxy security, and email routing for autobi.uz. Standard HTTP connection metadata (including client IP via CF-Connecting-IP) is used transiently for brute-force login rate limiting.",
-                    "Google Sheets: Only accessed when you explicitly submit a Google Sheets URL to ingest.",
-                    "Central Bank of Uzbekistan (cbu.uz): Queried strictly for public daily currency exchange rates when UZS/USD normalization runs; no dataset rows are transmitted to CBU.",
-                    "Telegram Bot API: Contacted only when you connect @auto_bibot or click Send Report to deliver your generated digest.",
-                ],
-            },
-            {
-                "title": "4. Security Controls",
-                "paragraphs": [
-                    "AutoBI enforces HTTPS transport security, HMAC-SHA256 cookie verification, login rate limiting, SSRF host validation on remote URLs, CSV/Excel formula injection sanitization, and strict browser security headers (Content-Security-Policy, X-Frame-Options, and X-Content-Type-Options).",
-                ],
-                "bullets": [],
-            },
-            {
-                "title": "5. Your Choices & Contact",
-                "paragraphs": [
-                    "You may purge any active dataset session immediately in the UI, revoke your browser cookie via Sign Out, or contact us with privacy, deletion, or security questions at support@autobi.uz.",
-                ],
-                "bullets": [],
-            },
-        ],
-    },
-    "terms": {
-        "doc_type": "terms",
-        "page_title": "Terms of Service",
-        "meta_description": "Terms governing access to and use of AutoBI Studio at autobi.uz.",
-        "effective_date": "November 15, 2026",
-        "heading": "Terms of Service",
-        "lead": "The rules, ownership rights, and disclaimers that apply when you use AutoBI Studio at autobi.uz.",
-        "sections": [
-            {
-                "title": "1. Acceptance of Terms",
-                "paragraphs": [
-                    "By accessing or using AutoBI Studio (https://autobi.uz), including uploading files, connecting spreadsheets, or downloading generated Power BI artifacts, you agree to be bound by these Terms of Service and our Privacy Policy.",
-                ],
-                "bullets": [],
-            },
-            {
-                "title": "2. Ownership & Your Data Responsibilities",
-                "paragraphs": [
-                    "You retain all ownership and intellectual property rights in the spreadsheets you upload and the outputs generated for you (including cleaned CSVs, Power Query M scripts, DAX formulas, HTML previews, and .pbip bundles).",
-                ],
-                "bullets": [
-                    "You confirm that you have all necessary rights and organizational permissions to upload and process any business or financial data you submit.",
-                    "You agree not to upload unlawful or malicious payloads, probe or bypass access controls or rate limits, or disrupt service availability for other users.",
-                ],
-            },
-            {
-                "title": "3. Automated Analytics & Output Verification",
-                "paragraphs": [
-                    "AutoBI Studio uses automated heuristics to classify business domains, repair malformed spreadsheet cells, detect statistical anomalies, fetch public CBU.uz reference rates, and generate Power BI DAX and M scripts.",
-                    "Outputs are provided for analytical assistance only. You are solely responsible for reviewing and validating cleaned datasets, exchange-rate conversions, and generated formulas before relying on them for financial reporting, tax, compliance, or executive decisions.",
-                ],
-                "bullets": [],
-            },
-            {
-                "title": "4. Ephemeral Availability & Session Expiry",
-                "paragraphs": [
-                    "Active analysis sessions expire automatically after 2 hours and may be cleared sooner via explicit Purge or server maintenance. Always download your Power BI starter pack (.zip/.pbip) before leaving or purging a session; AutoBI Studio is not a backup or archival service.",
-                ],
-                "bullets": [],
-            },
-            {
-                "title": "5. Disclaimer & Limitation of Liability",
-                "paragraphs": [
-                    "AutoBI Studio is provided on an \"as-is\" and \"as-available\" basis without warranties of any kind, express or implied, including merchantability, fitness for a particular purpose, or uninterrupted uptime.",
-                    "To the maximum extent permitted by applicable law, AutoBI Studio and its operators shall not be liable for any indirect, incidental, consequential, or data-loss damages arising out of your use of or inability to use the service.",
-                ],
-                "bullets": [],
-            },
-            {
-                "title": "6. Changes & Contact",
-                "paragraphs": [
-                    "We may update these Terms or our Privacy Policy from time to time by updating the Effective Date on this page. Questions about these Terms may be sent to support@autobi.uz.",
-                ],
-                "bullets": [],
-            },
-        ],
-    },
-}
+def _render_legal_page(doc_key: str):
+    """Render a localized legal document (/privacy or /terms) and persist ?lang= preference."""
+    lang = resolve_lang(request)
+    doc = LEGAL_DOCUMENTS[doc_key].get(lang, LEGAL_DOCUMENTS[doc_key]["en"])
+    ui = LEGAL_UI.get(lang, LEGAL_UI["en"])
+    html_out = render_template("legal.html", lang=lang, supported_langs=SUPPORTED_LANGS, legal_ui=ui, **doc)
+    res = make_response(html_out)
+    explicit_lang = normalize_lang(request.args.get("lang", ""))
+    if explicit_lang in SUPPORTED_LANGS:
+        res.set_cookie(
+            "autobi_lang",
+            explicit_lang,
+            max_age=365 * 86400,
+            samesite="Lax",
+            secure=_is_https_request(),
+        )
+    return res
 
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    lang = resolve_lang(request)
+    res = make_response(render_template("index.html", lang=lang))
+    explicit_lang = normalize_lang(request.args.get("lang", ""))
+    if explicit_lang in SUPPORTED_LANGS:
+        res.set_cookie(
+            "autobi_lang",
+            explicit_lang,
+            max_age=365 * 86400,
+            samesite="Lax",
+            secure=_is_https_request(),
+        )
+    return res
 
 
 @app.route("/privacy")
 def privacy_policy():
-    """Render the AutoBI Studio Privacy Policy page."""
-    return render_template("legal.html", **LEGAL_DOCUMENTS["privacy"])
+    """Render the localized AutoBI Studio Privacy Policy page."""
+    return _render_legal_page("privacy")
 
 
 @app.route("/terms")
 def terms_of_service():
-    """Render the AutoBI Studio Terms of Service page."""
-    return render_template("legal.html", **LEGAL_DOCUMENTS["terms"])
+    """Render the localized AutoBI Studio Terms of Service page."""
+    return _render_legal_page("terms")
 
 
 @app.route("/favicon.ico")

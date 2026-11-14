@@ -5,6 +5,17 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+    const i18n = window.autobiI18n;
+    const t = (key, vars) => (i18n ? i18n.t(key, vars) : key);
+    if (i18n) {
+        i18n.applyTranslations();
+        document.querySelectorAll('.lang-btn[data-lang]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                i18n.setLang(btn.getAttribute('data-lang'));
+            });
+        });
+    }
+
     // Utility: XSS prevention
     function escapeHtml(text) {
         if (text === null || text === undefined) return '';
@@ -110,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (openAuthBtn) openAuthBtn.style.display = 'none';
                     if (userStatusBadge) {
                         userStatusBadge.style.display = 'inline-flex';
-                        if (userEmailSpan) userEmailSpan.textContent = data.user || 'Authenticated';
+                        if (userEmailSpan) userEmailSpan.textContent = data.user || t('badge_authenticated');
                     }
                     if (logoutBtn) logoutBtn.style.display = 'inline-flex';
                 }
@@ -174,13 +185,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } else {
                     if (authErrorMsg) {
-                        authErrorMsg.textContent = data.error || 'Authentication failed.';
+                        authErrorMsg.textContent = data.error || t('err_auth_failed');
                         authErrorMsg.style.display = 'block';
                     }
                 }
             } catch (err) {
                 if (authErrorMsg) {
-                    authErrorMsg.textContent = 'Server connection error: ' + err.message;
+                    authErrorMsg.textContent = t('err_server_conn') + err.message;
                     authErrorMsg.style.display = 'block';
                 }
             }
@@ -212,13 +223,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 connectedChatId = data.chat_id;
                 connectedUserLabel = data.label || data.first_name || data.username || String(data.chat_id);
                 if (tgDetectBadge) {
-                    tgDetectBadge.textContent = '✓ Connected';
+                    tgDetectBadge.textContent = t('tg_connected');
                     tgDetectBadge.style.background = 'rgba(16, 185, 129, 0.25)';
                     tgDetectBadge.style.color = '#6ee7b7';
                 }
                 if (tgConnectedUserBanner) {
                     tgConnectedUserBanner.style.display = 'block';
-                    tgConnectedUserBanner.innerHTML = `✓ Connected: <b>${escapeHtml(connectedUserLabel)}</b>. Report will be delivered to your Telegram chat!`;
+                    tgConnectedUserBanner.innerHTML = t('tg_connected_banner', { user: escapeHtml(connectedUserLabel) });
                 }
                 if (tgPollTimer) {
                     clearInterval(tgPollTimer);
@@ -241,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sendTelegramBtn) {
         sendTelegramBtn.addEventListener('click', async () => {
             if (!currentSessionId) {
-                alert('Please upload or analyze a dataset first before sending report to Telegram.');
+                alert(t('tg_need_dataset'));
                 return;
             }
 
@@ -250,7 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
             connectedUserLabel = null;
             if (tgConnectedUserBanner) tgConnectedUserBanner.style.display = 'none';
             if (tgDetectBadge) {
-                tgDetectBadge.textContent = 'Auto-detecting...';
+                tgDetectBadge.textContent = t('tg_detecting');
                 tgDetectBadge.style.background = 'rgba(255,255,255,0.08)';
                 tgDetectBadge.style.color = 'var(--text-muted)';
             }
@@ -271,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (tgDirectStartLink) {
                     tgDirectStartLink.href = `https://t.me/${cleanBotName}?start=${tgConnectCode}`;
-                    tgDirectStartLink.textContent = `🚀 Open ${botName} & Start`;
+                    tgDirectStartLink.textContent = t('tg_open_bot', { bot: botName });
                 }
 
                 // Render recent subscriber pills
@@ -329,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
         telegramDispatchForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!currentSessionId) {
-                alert('Session expired. Please re-run analysis.');
+                alert(t('tg_session_expired'));
                 return;
             }
 
@@ -359,14 +370,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     telegramStatusMsg.style.background = 'rgba(245, 158, 11, 0.15)';
                     telegramStatusMsg.style.borderColor = 'rgba(245, 158, 11, 0.3)';
                     telegramStatusMsg.style.color = '#fcd34d';
-                    telegramStatusMsg.textContent = 'Please tap "Open @auto_bibot & Start" in Telegram, or enter at least one recipient link or username.';
+                    telegramStatusMsg.textContent = t('tg_need_target');
                 }
                 return;
             }
 
             if (telegramSubmitBtn) {
                 telegramSubmitBtn.disabled = true;
-                telegramSubmitBtn.textContent = '✈️ Dispatching...';
+                telegramSubmitBtn.textContent = t('tg_sending');
             }
             if (telegramStatusMsg) {
                 telegramStatusMsg.style.display = 'none';
@@ -391,13 +402,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         telegramStatusMsg.style.borderColor = 'rgba(16, 185, 129, 0.3)';
                         telegramStatusMsg.style.color = '#6ee7b7';
                         const count = data.dispatched_count || (data.dispatched ? data.dispatched.length : 1);
-                        telegramStatusMsg.innerHTML = `<b>✓ Dispatched successfully!</b> Sent executive digest and HTML dashboard to <b>${count}</b> recipient(s).`;
+                        telegramStatusMsg.innerHTML = t('tg_sent_ok', { count });
                     }
                     setTimeout(() => {
                         closeTgModal();
                         if (telegramSubmitBtn) {
                             telegramSubmitBtn.disabled = false;
-                            telegramSubmitBtn.textContent = '✈️ Send Report';
+                            telegramSubmitBtn.textContent = t('tg_send');
                         }
                     }, 2000);
                 } else {
@@ -406,11 +417,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         telegramStatusMsg.style.background = 'rgba(239, 68, 68, 0.15)';
                         telegramStatusMsg.style.borderColor = 'rgba(239, 68, 68, 0.3)';
                         telegramStatusMsg.style.color = '#fca5a5';
-                        telegramStatusMsg.textContent = data.error || 'Failed to dispatch report to Telegram.';
+                        telegramStatusMsg.textContent = data.error || t('tg_send_fail');
                     }
                     if (telegramSubmitBtn) {
                         telegramSubmitBtn.disabled = false;
-                        telegramSubmitBtn.textContent = '✈️ Send Report';
+                        telegramSubmitBtn.textContent = t('tg_send');
                     }
                 }
             } catch (err) {
@@ -419,11 +430,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     telegramStatusMsg.style.background = 'rgba(239, 68, 68, 0.15)';
                     telegramStatusMsg.style.borderColor = 'rgba(239, 68, 68, 0.3)';
                     telegramStatusMsg.style.color = '#fca5a5';
-                    telegramStatusMsg.textContent = 'Network error: ' + err.message;
+                    telegramStatusMsg.textContent = t('err_network') + err.message;
                 }
                 if (telegramSubmitBtn) {
                     telegramSubmitBtn.disabled = false;
-                    telegramSubmitBtn.textContent = '✈️ Send Report';
+                    telegramSubmitBtn.textContent = t('tg_send');
                 }
             }
         });
@@ -437,6 +448,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSessionId = null;
     let currentLastFile = null;
     let currentLastDomain = 'sales';
+    let lastRenderedData = null;
+
+    if (i18n) {
+        i18n.onChange(() => {
+            if (lastRenderedData) renderResults(lastRenderedData);
+        });
+    }
 
     // Ingestion Mode Toggles (File vs Google Sheets)
     if (tabModeFile && tabModeGSheets && dropzone && gsheetsSection) {
@@ -456,7 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function ingestGoogleSheetUrl(url) {
-        showLoading('Connecting and analyzing Google Sheet...');
+        showLoading(t('loading_gsheet'));
         try {
             const res = await fetch('/api/ingest-url', {
                 method: 'POST',
@@ -473,11 +491,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 renderResults(data);
             } else {
-                alert('Google Sheets Error: ' + (data.error || 'Failed to ingest sheet.'));
+                alert(t('err_gsheets') + (data.error || t('err_gsheets_default')));
                 uploadCard.style.display = 'block';
             }
         } catch (err) {
-            alert('Connection Error: ' + err.message);
+            alert(t('err_server_conn') + err.message);
             uploadCard.style.display = 'block';
         } finally {
             hideLoading();
@@ -593,7 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleFileUpload(file, domainOverride = null, sheetOverride = null) {
         const ext = file.name.split('.').pop().toLowerCase();
         if (!['xlsx', 'xls', 'csv'].includes(ext)) {
-            alert(`Unsupported file type: .${ext}. Please upload an Excel (.xlsx, .xls) or CSV file.`);
+            alert(t('err_unsupported_file', { ext }));
             return;
         }
 
@@ -622,11 +640,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 renderResults(data);
             } else {
-                alert('Analysis Error: ' + (data.error || 'Failed to process spreadsheet.'));
+                alert(t('err_analysis') + (data.error || t('err_analysis_default')));
                 uploadCard.style.display = 'block';
             }
         } catch (err) {
-            alert('Server Error: ' + err.message);
+            alert(t('err_server') + err.message);
             uploadCard.style.display = 'block';
         } finally {
             hideLoading();
@@ -636,7 +654,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleSampleRun(domain = 'sales') {
         currentLastDomain = domain;
         currentLastFile = null;
-        showLoading(`Preset: ${domain.toUpperCase()} Demo Dataset`);
+        showLoading(t('loading_preset', { domain: domain.toUpperCase() }));
 
         try {
             const res = await fetch('/api/sample', {
@@ -654,11 +672,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 renderResults(data);
             } else {
-                alert('Sample Run Error: ' + (data.error || 'Failed to load sample dataset.'));
+                alert(t('err_sample') + (data.error || t('err_sample_default')));
                 uploadCard.style.display = 'block';
             }
         } catch (err) {
-            alert('Server Error: ' + err.message);
+            alert(t('err_server') + err.message);
             uploadCard.style.display = 'block';
         } finally {
             hideLoading();
@@ -667,13 +685,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Render Results ---
     function renderResults(data) {
+        lastRenderedData = data;
         currentSessionId = data.session_id;
-        activeFileBadge.textContent = data.is_live_url ? `${data.filename} 🌐 (Live Google Sheet)` : data.filename;
+        activeFileBadge.textContent = data.is_live_url ? t('source_live_gsheet', { filename: data.filename }) : data.filename;
 
         // 1. Domain Badge & Switcher
         const dom = data.domain;
         if (domainBadge && dom) {
-            domainBadge.textContent = `${dom.icon} ${dom.label} (${dom.confidence}% match)`;
+            domainBadge.textContent = t('domain_match', { icon: dom.icon, label: dom.label, conf: dom.confidence });
             if (domainSelect) {
                 domainSelect.value = dom.key;
             }
@@ -688,9 +707,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 alertBanner.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span>🚨</span>
-                        <span><strong>Executive risk alert:</strong> Found ${summary.critical_count || 0} critical risk(s) and ${summary.warning_count || 0} warning(s) in this dataset.</span>
+                        <span>${t('risk_banner', { crit: summary.critical_count || 0, warn: summary.warning_count || 0 })}</span>
                     </div>
-                    <button id="viewAuditRiskLink" style="background: none; border: none; color: #f43f5e; text-decoration: underline; font-weight: 600; cursor: pointer; font-size: 13px;">Review audit details →</button>
+                    <button id="viewAuditRiskLink" style="background: none; border: none; color: #f43f5e; text-decoration: underline; font-weight: 600; cursor: pointer; font-size: 13px;">${escapeHtml(t('risk_review_btn'))}</button>
                 `;
                 const btn = document.getElementById('viewAuditRiskLink');
                 if (btn) {
@@ -746,7 +765,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Configure explicit Data Privacy Purge
         if (purgeDataBtn) {
             purgeDataBtn.onclick = async () => {
-                if (!confirm("Are you sure you want to permanently purge all data from this session? This will wipe the cleaned dataset and all artifacts from server RAM and disk.")) {
+                if (!confirm(t('confirm_purge'))) {
                     return;
                 }
                 try {
@@ -759,6 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     fileInput.value = '';
                     currentLastFile = null;
                     currentSessionId = null;
+                    lastRenderedData = null;
 
                     // Show purge confirmation
                     if (purgeBanner) {
@@ -769,7 +789,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                 } catch (e) {
-                    alert('Error purging data: ' + e.message);
+                    alert(t('err_purge') + e.message);
                 }
             };
         }
@@ -917,14 +937,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="audit-icon rose">🚨</div>
                     <div style="flex: 1;">
                         <div style="display: flex; align-items: center; justify-content: space-between;">
-                            <h3>CFO Red-Flags & Anomaly Detection (${anomalies.length} Flagged)</h3>
+                            <h3>${escapeHtml(t('audit_flags_title', { count: anomalies.length }))}</h3>
                             <div style="display: flex; gap: 6px;">
-                                ${anomalySummary.critical_count > 0 ? `<span class="audit-item-badge" style="background: rgba(244,63,94,0.25); color: #fda4af;">${anomalySummary.critical_count} Critical</span>` : ''}
-                                ${anomalySummary.warning_count > 0 ? `<span class="audit-item-badge" style="background: rgba(245,158,11,0.25); color: #fde68a;">${anomalySummary.warning_count} Warning</span>` : ''}
-                                ${anomalySummary.info_count > 0 ? `<span class="audit-item-badge" style="background: rgba(56,189,248,0.25); color: #bae6fd;">${anomalySummary.info_count} Notice</span>` : ''}
+                                ${anomalySummary.critical_count > 0 ? `<span class="audit-item-badge" style="background: rgba(244,63,94,0.25); color: #fda4af;">${escapeHtml(t('audit_critical', { n: anomalySummary.critical_count }))}</span>` : ''}
+                                ${anomalySummary.warning_count > 0 ? `<span class="audit-item-badge" style="background: rgba(245,158,11,0.25); color: #fde68a;">${escapeHtml(t('audit_warning', { n: anomalySummary.warning_count }))}</span>` : ''}
+                                ${anomalySummary.info_count > 0 ? `<span class="audit-item-badge" style="background: rgba(56,189,248,0.25); color: #bae6fd;">${escapeHtml(t('audit_notice', { n: anomalySummary.info_count }))}</span>` : ''}
                             </div>
                         </div>
-                        <p class="text-xs text-slate-400">Automated audit checks for margin leakage, duplicate transactions, and extreme typo outliers.</p>
+                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_flags_desc'))}</p>
                     </div>
                 </div>
             `;
@@ -940,13 +960,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let sampleStr = '';
                 if (item.sample_rows && item.sample_rows.length > 0) {
-                    sampleStr = `<div style="font-size: 11px; font-family: monospace; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; width: 100%; overflow-x: auto;">Sample: ${JSON.stringify(item.sample_rows[0])}</div>`;
+                    sampleStr = `<div style="font-size: 11px; font-family: monospace; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; width: 100%; overflow-x: auto;">${escapeHtml(t('audit_sample_prefix'))} ${escapeHtml(JSON.stringify(item.sample_rows[0]))}</div>`;
                 }
 
                 el.innerHTML = `
                     <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
                         <span style="font-weight: 600; color: #e2e8f0;">[${escapeHtml(item.severity.toUpperCase())}] ${escapeHtml(item.title)}</span>
-                        <span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor};">${item.affected_count} record(s) affected</span>
+                        <span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor};">${escapeHtml(t('audit_affected', { n: item.affected_count }))}</span>
                     </div>
                     <span style="font-size: 12px; color: var(--text-muted);">${escapeHtml(item.description)}</span>
                     ${sampleStr}
@@ -961,8 +981,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="audit-card-header">
                     <div class="audit-icon emerald">✓</div>
                     <div>
-                        <h3>Clean Bill of Health: 0 Business Anomalies Detected</h3>
-                        <p class="text-xs text-slate-400">All records verified with positive unit margins, valid unique IDs, and within 3σ statistical variance.</p>
+                        <h3>${escapeHtml(t('audit_clean_title'))}</h3>
+                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_clean_desc'))}</p>
                     </div>
                 </div>
             `;
@@ -978,21 +998,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="audit-card-header">
                     <div class="audit-icon indigo">🔄</div>
                     <div>
-                        <h3>1C / ERP Cross-Tab Matrix Flattener Applied</h3>
-                        <p class="text-xs text-slate-400">Automatically unpivoted wide monthly columns into standardized time-series rows for Power BI time intelligence.</p>
+                        <h3>${escapeHtml(t('audit_unpivot_title'))}</h3>
+                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_unpivot_desc'))}</p>
                     </div>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Temporal Columns Unpivoted:</strong> ${unpivot.temporal_columns.length} columns (${escapeHtml(unpivot.temporal_columns.slice(0, 4).join(', '))}${unpivot.temporal_columns.length > 4 ? '...' : ''})</span>
+                    <span><strong>${escapeHtml(t('audit_unpivot_cols'))}</strong> ${escapeHtml(t('audit_cols_count', { n: unpivot.temporal_columns.length }))} (${escapeHtml(unpivot.temporal_columns.slice(0, 4).join(', '))}${unpivot.temporal_columns.length > 4 ? '...' : ''})</span>
                     <span class="audit-item-badge">pd.melt() + Table.Unpivot</span>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Pruned Summary Columns:</strong> ${escapeHtml(unpivot.pruned_summary_columns.join(', ') || 'None')}</span>
-                    <span class="audit-item-badge">Excluded from unpivot</span>
+                    <span><strong>${escapeHtml(t('audit_pruned_cols'))}</strong> ${escapeHtml(unpivot.pruned_summary_columns.join(', ') || t('none_label'))}</span>
+                    <span class="audit-item-badge">${escapeHtml(t('audit_excluded'))}</span>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Row Transformation:</strong> ${unpivot.original_rows} raw matrix rows → ${unpivot.unpivoted_rows} granular records</span>
-                    <span class="audit-item-badge">Standard Time Series</span>
+                    <span><strong>${escapeHtml(t('audit_row_transform'))}</strong> ${escapeHtml(t('audit_row_transform_val', { raw: unpivot.original_rows, unpivoted: unpivot.unpivoted_rows }))}</span>
+                    <span class="audit-item-badge">${escapeHtml(t('audit_std_ts'))}</span>
                 </div>
             `;
             auditList.appendChild(card);
@@ -1012,21 +1032,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="audit-card-header">
                     <div class="audit-icon indigo">💱</div>
                     <div>
-                        <h3>Multi-Currency FX Normalization (CBU.uz)</h3>
-                        <p class="text-xs text-slate-400">Converted mixed transaction currencies into standardized UZS and USD via official Central Bank of Uzbekistan rates.</p>
+                        <h3>${escapeHtml(t('audit_fx_title'))}</h3>
+                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_fx_desc'))}</p>
                     </div>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Detected Currencies:</strong> ${escapeHtml((fx.detected_currencies || []).join(', '))}</span>
-                    <span class="audit-item-badge">Column: <code>${escapeHtml(fx.currency_column || 'currency')}</code></span>
+                    <span><strong>${escapeHtml(t('audit_fx_currencies'))}</strong> ${escapeHtml((fx.detected_currencies || []).join(', '))}</span>
+                    <span class="audit-item-badge">${escapeHtml(t('audit_fx_col'))} <code>${escapeHtml(fx.currency_column || 'currency')}</code></span>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Official CBU Rates Applied:</strong> ${escapeHtml(ratesText || '1 USD = 12,000 UZS')}</span>
-                    <span class="audit-item-badge">CBU Date: ${escapeHtml(fx.cbu_date || 'Today')}</span>
+                    <span><strong>${escapeHtml(t('audit_fx_rates'))}</strong> ${escapeHtml(ratesText || '1 USD = 12,000 UZS')}</span>
+                    <span class="audit-item-badge">${escapeHtml(t('audit_fx_date', { date: fx.cbu_date || 'Today' }))}</span>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Normalized Columns Added:</strong> <code>${escapeHtml((fx.converted_columns || []).join(', '))}</code></span>
-                    <span class="audit-item-badge">UZS & USD Standardized</span>
+                    <span><strong>${escapeHtml(t('audit_fx_added'))}</strong> <code>${escapeHtml((fx.converted_columns || []).join(', '))}</code></span>
+                    <span class="audit-item-badge">${escapeHtml(t('audit_fx_std'))}</span>
                 </div>
             `;
             auditList.appendChild(card);
@@ -1041,21 +1061,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="audit-card-header">
                     <div class="audit-icon emerald">🎯</div>
                     <div>
-                        <h3>Pareto (80/20) ABC Driver Segmentation</h3>
-                        <p class="text-xs text-slate-400">Identified vital high-volume contributors vs. long-tail drivers across <code>${escapeHtml(pareto.dimension_col || 'product')}</code>.</p>
+                        <h3>${escapeHtml(t('audit_pareto_title'))}</h3>
+                        <p class="text-xs text-slate-400">${t('audit_pareto_desc', { col: escapeHtml(pareto.dimension_col || 'product') })}</p>
                     </div>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Class A (Top 80% Vital Few):</strong> ${pareto.class_a_count} key driver(s)</span>
-                    <span class="audit-item-badge" style="background: rgba(16,185,129,0.2); color: #6ee7b7;">${pareto.class_a_revenue_share}% Volume</span>
+                    <span><strong>${escapeHtml(t('audit_pareto_a'))}</strong> ${escapeHtml(t('audit_drivers_key', { n: pareto.class_a_count }))}</span>
+                    <span class="audit-item-badge" style="background: rgba(16,185,129,0.2); color: #6ee7b7;">${escapeHtml(t('audit_volume', { pct: pareto.class_a_revenue_share }))}</span>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Class B (Next 15% Moderate):</strong> ${pareto.class_b_count} secondary driver(s)</span>
-                    <span class="audit-item-badge" style="background: rgba(6,182,212,0.2); color: #67e8f9;">${pareto.class_b_revenue_share}% Volume</span>
+                    <span><strong>${escapeHtml(t('audit_pareto_b'))}</strong> ${escapeHtml(t('audit_drivers_sec', { n: pareto.class_b_count }))}</span>
+                    <span class="audit-item-badge" style="background: rgba(6,182,212,0.2); color: #67e8f9;">${escapeHtml(t('audit_volume', { pct: pareto.class_b_revenue_share }))}</span>
                 </div>
                 <div class="audit-item">
-                    <span><strong>Class C (Bottom 5% Long-Tail):</strong> ${pareto.class_c_count} minor item(s)</span>
-                    <span class="audit-item-badge" style="background: rgba(148,163,184,0.2); color: #cbd5e1;">${pareto.class_c_revenue_share}% Volume</span>
+                    <span><strong>${escapeHtml(t('audit_pareto_c'))}</strong> ${escapeHtml(t('audit_drivers_min', { n: pareto.class_c_count }))}</span>
+                    <span class="audit-item-badge" style="background: rgba(148,163,184,0.2); color: #cbd5e1;">${escapeHtml(t('audit_volume', { pct: pareto.class_c_revenue_share }))}</span>
                 </div>
             `;
             auditList.appendChild(card);
@@ -1069,8 +1089,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="audit-card-header">
                     <div class="audit-icon rose">✕</div>
                     <div>
-                        <h3>Eliminated ${audit.dropped_rows.length} Corrupting Trailer/Summary Row(s)</h3>
-                        <p class="text-xs text-slate-400">Human totals and blank rows purged to prevent skewing DAX aggregations.</p>
+                        <h3>${escapeHtml(t('audit_dropped_title', { n: audit.dropped_rows.length }))}</h3>
+                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_dropped_desc'))}</p>
                     </div>
                 </div>
             `;
@@ -1078,8 +1098,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const el = document.createElement('div');
                 el.className = 'audit-item';
                 el.innerHTML = `
-                    <span><strong>Row #${item.row_index}:</strong> ${item.reason}</span>
-                    <span class="audit-item-badge">Preview: ${JSON.stringify(item.content_preview)}</span>
+                    <span><strong>${escapeHtml(t('audit_row_num', { idx: item.row_index }))}</strong> ${escapeHtml(item.reason)}</span>
+                    <span class="audit-item-badge">${escapeHtml(t('audit_preview_prefix'))} ${escapeHtml(JSON.stringify(item.content_preview))}</span>
                 `;
                 card.appendChild(el);
             });
@@ -1094,8 +1114,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="audit-card-header">
                     <div class="audit-icon emerald">✓</div>
                     <div>
-                        <h3>Auto-Computed ${audit.inferred_calculations.length} Missing Business Metric(s)</h3>
-                        <p class="text-xs text-slate-400">Reconstructed missing calculations from existing attributes.</p>
+                        <h3>${escapeHtml(t('audit_inferred_title', { n: audit.inferred_calculations.length }))}</h3>
+                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_inferred_desc'))}</p>
                     </div>
                 </div>
             `;
@@ -1103,8 +1123,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const el = document.createElement('div');
                 el.className = 'audit-item';
                 el.innerHTML = `
-                    <span><strong>Column: <code>${item.column}</code></strong> → Formula: <code>${item.formula}</code></span>
-                    <span class="audit-item-badge">${item.status}</span>
+                    <span><strong><code>${escapeHtml(item.column)}</code></strong> → ${escapeHtml(t('audit_formula'))} <code>${escapeHtml(item.formula)}</code></span>
+                    <span class="audit-item-badge">${escapeHtml(item.status)}</span>
                 `;
                 card.appendChild(el);
             });
@@ -1118,17 +1138,17 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="audit-card-header">
                 <div class="audit-icon indigo">⚙</div>
                 <div>
-                    <h3>Schema Normalization & Datatype Sanitization</h3>
-                    <p class="text-xs text-slate-400">Headers standardized for clean DAX / Power Query syntax.</p>
+                    <h3>${escapeHtml(t('audit_schema_title'))}</h3>
+                    <p class="text-xs text-slate-400">${escapeHtml(t('audit_schema_desc'))}</p>
                 </div>
             </div>
             <div class="audit-item">
-                <span><strong>Renamed Columns:</strong> ${Object.keys(audit.renamed_columns || {}).length} headers standardized.</span>
-                <span class="audit-item-badge">No special chars, lowercase snake_case</span>
+                <span><strong>${escapeHtml(t('audit_renamed_cols'))}</strong> ${escapeHtml(t('audit_renamed_val', { n: Object.keys(audit.renamed_columns || {}).length }))}</span>
+                <span class="audit-item-badge">${escapeHtml(t('audit_snake_badge'))}</span>
             </div>
             <div class="audit-item">
-                <span><strong>Valid Clean Rows:</strong> ${audit.cleaned_row_count} of ${audit.raw_row_count} raw rows loaded.</span>
-                <span class="audit-item-badge">100% Verified</span>
+                <span><strong>${escapeHtml(t('audit_valid_rows'))}</strong> ${escapeHtml(t('audit_valid_rows_val', { clean: audit.cleaned_row_count, raw: audit.raw_row_count }))}</span>
+                <span class="audit-item-badge">${escapeHtml(t('audit_verified_badge'))}</span>
             </div>
         `;
         auditList.appendChild(card);
@@ -1141,10 +1161,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const pqTableName = document.getElementById('pqTableName');
 
         if (daxDomainTitle && domain) {
-            daxDomainTitle.textContent = `${domain.label} — DAX Measures (${daxMeasures.length})`;
+            daxDomainTitle.textContent = t('dax_measures_title', { label: domain.label, count: daxMeasures.length });
         }
         if (pqTableName && domain) {
-            pqTableName.textContent = `LoadData.m (Target Table: '${domain.table_name}')`;
+            pqTableName.textContent = t('pq_target_table', { table: domain.table_name });
         }
 
         daxList.innerHTML = '';
@@ -1155,9 +1175,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="code-card-header">
                     <div>
                         <span class="code-card-title">${escapeHtml(m.name)}</span>
-                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">Format: <code>${escapeHtml(m.format)}</code></span>
+                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">${escapeHtml(t('dax_format_label'))} <code>${escapeHtml(m.format)}</code></span>
                     </div>
-                    <button class="copy-btn" data-code="${encodeURIComponent(m.dax)}">Copy DAX</button>
+                    <button class="copy-btn" data-code="${encodeURIComponent(m.dax)}">${escapeHtml(t('btn_copy_dax'))}</button>
                 </div>
                 <pre class="code-block">${escapeHtml(m.dax)}</pre>
             `;
@@ -1185,7 +1205,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function copyToClipboard(text, btn) {
         navigator.clipboard.writeText(text).then(() => {
             const originalText = btn.textContent;
-            btn.textContent = 'Copied!';
+            btn.textContent = t('btn_copied');
             btn.classList.add('copied');
             setTimeout(() => {
                 btn.textContent = originalText;
@@ -1227,7 +1247,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (c === 'abc_class') {
                     const badgeBg = val === 'A' ? 'rgba(16,185,129,0.25)' : (val === 'B' ? 'rgba(6,182,212,0.25)' : 'rgba(148,163,184,0.2)');
                     const badgeColor = val === 'A' ? '#6ee7b7' : (val === 'B' ? '#67e8f9' : '#cbd5e1');
-                    td.innerHTML = `<span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700;">Class ${val}</span>`;
+                    td.innerHTML = `<span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor}; font-weight: 700;">${escapeHtml(t('class_badge', { val }))}</span>`;
                 } else if (typeof val === 'number') {
                     if (c.includes('_uzs')) {
                         td.textContent = val.toLocaleString() + " so'm";

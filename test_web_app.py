@@ -60,6 +60,8 @@ def test_index_route():
     assert b"support@autobi.uz" in res.data
     assert b"autobi-icon.svg" in res.data
     assert b"favicon.svg" in res.data
+    assert b"i18n.js" in res.data
+    assert b"lang-switcher" in res.data
     print("[PASS] test_index_route")
 
 
@@ -73,22 +75,41 @@ def test_brand_assets():
         ("/static/img/favicon.svg", "image/svg+xml"),
         ("/static/img/favicon-32x32.png", "image/png"),
         ("/static/site.webmanifest", "application/"),
+        ("/static/js/i18n.js", "javascript"),
     ]:
         res = client.get(path)
         assert res.status_code == 200, f"Expected 200 on {path}, got {res.status_code}"
         assert expected_mime in (res.content_type or ""), f"Unexpected mime for {path}: {res.content_type}"
-    print("[PASS] test_brand_assets (SVG logo, icons, favicon & manifest)")
+    print("[PASS] test_brand_assets (SVG logo, icons, favicon, manifest & i18n.js)")
 
 
 def test_legal_pages():
-    client = app.test_client()
-    for path, expected_heading in [("/privacy", b"Privacy Policy"), ("/terms", b"Terms of Service")]:
+    cases = [
+        ("/privacy", "en", b"Privacy Policy"),
+        ("/privacy?lang=ru", "ru", "Политика конфиденциальности".encode("utf-8")),
+        ("/privacy?lang=uz", "uz", b"Maxfiylik siyosati"),
+        ("/terms", "en", b"Terms of Service"),
+        ("/terms?lang=ru", "ru", "Условия использования".encode("utf-8")),
+        ("/terms?lang=uz", "uz", b"Foydalanish shartlari"),
+    ]
+    for path, expected_lang, expected_heading in cases:
+        client = app.test_client()
         res = client.get(path)
         assert res.status_code == 200, f"Expected 200 on {path}, got {res.status_code}"
+        assert f'<html lang="{expected_lang}"'.encode("utf-8") in res.data
         assert expected_heading in res.data
         assert b"support@autobi.uz" in res.data
-        assert b"7,200 seconds" in res.data or b"2 hours" in res.data
-    print("[PASS] test_legal_pages (/privacy & /terms)")
+
+    # Verify explicit ?lang= persists via autobi_lang cookie onto subsequent navigation
+    cookie_client = app.test_client()
+    res_uz = cookie_client.get("/privacy?lang=uz")
+    assert res_uz.status_code == 200
+    assert b'<html lang="uz"' in res_uz.data
+    res_terms_persisted = cookie_client.get("/terms")
+    assert res_terms_persisted.status_code == 200
+    assert b'<html lang="uz"' in res_terms_persisted.data
+    assert b"Foydalanish shartlari" in res_terms_persisted.data
+    print("[PASS] test_legal_pages (/privacy & /terms in EN/RU/UZ + cookie persistence)")
 
 
 def test_api_sample():

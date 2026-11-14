@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang or 'en' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -27,25 +27,30 @@
                 <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img" width="44" height="44">
                 <div class="brand-meta">
                     <h1>AutoBI Studio</h1>
-                    <p>Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
+                    <p data-i18n="brand_tagline">Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
                 </div>
             </div>
             <div class="header-badges">
+                <div class="lang-switcher" role="group" aria-label="Language selector">
+                    <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
+                    <button type="button" class="lang-btn" data-lang="ru" aria-pressed="false">RU</button>
+                    <button type="button" class="lang-btn" data-lang="uz" aria-pressed="false">UZ</button>
+                </div>
                 <span id="userStatusBadge" class="badge badge-emerald" style="display: none;">
-                    <span class="badge-pulse"></span> <span id="userEmailSpan">Authenticated</span>
+                    <span class="badge-pulse"></span> <span id="userEmailSpan" data-i18n="badge_authenticated">Authenticated</span>
                 </span>
-                <button type="button" id="openAuthBtn" class="btn btn-primary" style="display: none; padding: 6px 14px; font-size: 12px;">🔓 Sign In</button>
-                <button type="button" id="logoutBtn" class="btn btn-secondary" style="display: none; padding: 5px 12px; font-size: 12px;">Sign Out</button>
+                <button type="button" id="openAuthBtn" class="btn btn-primary" style="display: none; padding: 6px 14px; font-size: 12px;" data-i18n="btn_signin">🔓 Sign In</button>
+                <button type="button" id="logoutBtn" class="btn btn-secondary" style="display: none; padding: 5px 12px; font-size: 12px;" data-i18n="btn_signout">Sign Out</button>
                 <span class="badge badge-emerald">
-                    <span class="badge-pulse"></span> Multi-Domain Engine Active
+                    <span class="badge-pulse"></span> <span data-i18n="badge_engine_active">Multi-Domain Engine Active</span>
                 </span>
             </div>
         </header>
 
         <!-- Hero Section -->
         <section class="hero-section">
-            <h2 class="hero-title">From Messy Spreadsheets to Power BI in Seconds</h2>
-            <p class="hero-subtitle">
+            <h2 class="hero-title" data-i18n="hero_title">From Messy Spreadsheets to Power BI in Seconds</h2>
+            <p class="hero-subtitle" data-i18n="hero_subtitle">
                 Drop any business spreadsheet — Sales, Marketing, HR, Inventory, or Finance. 
                 AutoBI auto-detects the domain, cleanses human errors, and generates tailored DAX measures.
             </p>
@@ -55,15 +60,15 @@
         <div class="enterprise-trust-banner">
             <div class="trust-badge-group">
                 <span class="trust-shield">🛡️</span>
-                <span class="trust-badge-label">Zero-Persistence Guarantee:</span>
+                <span class="trust-badge-label" data-i18n="trust_title">Zero-Persistence Guarantee:</span>
             </div>
-            <p class="trust-guarantee-text">
+            <p class="trust-guarantee-text" data-i18n="trust_text">
                 Your data is held only in a temporary 2-hour session cache and is never used to train models or permanently archived.
             </p>
             <div class="trust-chips">
-                <span class="trust-chip">🔒 Ephemeral 2-Hour Session TTL</span>
-                <span class="trust-chip">⚡ 1-Click Explicit Purge</span>
-                <span class="trust-chip">🚫 No AI Model Training</span>
+                <span class="trust-chip" data-i18n="trust_chip_ttl">🔒 Ephemeral 2-Hour Session TTL</span>
+                <span class="trust-chip" data-i18n="trust_chip_purge">⚡ 1-Click Explicit Purge</span>
+                <span class="trust-chip" data-i18n="trust_chip_notrain">🚫 No AI Model Training</span>
             </div>
         </div>
 
@@ -71,10 +76,10 @@
         <div id="uploadCard" class="upload-card">
             <!-- Ingestion Mode Tabs -->
             <div class="upload-mode-tabs" style="display: flex; gap: 8px; margin-bottom: 20px;">
-                <button type="button" id="tabModeFile" class="tab-btn active" style="padding: 8px 16px; font-size: 13px;">
+                <button type="button" id="tabModeFile" class="tab-btn active" style="padding: 8px 16px; font-size: 13px;" data-i18n="mode_file">
                     📁 Upload File (.xlsx, .csv)
                 </button>
-                <button type="button" id="tabModeGSheets" class="tab-btn" style="padding: 8px 16px; font-size: 13px;">
+                <button type="button" id="tabModeGSheets" class="tab-btn" style="padding: 8px 16px; font-size: 13px;" data-i18n="mode_gsheets">
                     🌐 Google Sheets (Live Refresh)
                 </button>
             </div>
@@ -83,58 +88,58 @@
                 <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" style="display: none;">
                 <div class="dropzone-icon">📁</div>
                 <div class="dropzone-prompt">
-                    <h3>Drag & Drop your Excel or CSV file here</h3>
-                    <p>Auto-detects Sales, Marketing, HR, Inventory, or Finance schemas</p>
+                    <h3 data-i18n="dropzone_title">Drag & Drop your Excel or CSV file here</h3>
+                    <p data-i18n="dropzone_sub">Auto-detects Sales, Marketing, HR, Inventory, or Finance schemas</p>
                 </div>
                 <div class="dropzone-actions">
-                    <button type="button" id="browseBtn" class="btn btn-primary">Browse Files</button>
-                    <button type="button" id="sampleBtn" class="btn btn-secondary">⚡ Try Demo Sample (Sales)</button>
+                    <button type="button" id="browseBtn" class="btn btn-primary" data-i18n="btn_browse">Browse Files</button>
+                    <button type="button" id="sampleBtn" class="btn btn-secondary" data-i18n="btn_sample">⚡ Try Demo Sample (Sales)</button>
                 </div>
             </div>
 
             <!-- Google Sheets URL Form (Hidden by default) -->
             <div id="gsheetsSection" style="display: none; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 32px 24px; text-align: center;">
                 <div style="font-size: 32px; margin-bottom: 12px;">🌐</div>
-                <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 6px;">
+                <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 6px;" data-i18n="gsheets_title">
                     Connect Live Google Sheet
                 </h3>
-                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px; max-width: 540px; margin-left: auto; margin-right: auto;">
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px; max-width: 540px; margin-left: auto; margin-right: auto;" data-i18n="gsheets_sub">
                     Paste your public Google Sheets link. AutoBI cleans it and creates a Power BI model configured with live 1-click cloud refresh.
                 </p>
                 <form id="gsheetsForm" style="display: flex; gap: 10px; max-width: 640px; margin: 0 auto; flex-wrap: wrap;">
-                    <input type="url" id="gsheetsUrlInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" required style="flex: 1; min-width: 280px; background: rgba(10, 15, 30, 0.8); border: 1px solid var(--border-active); border-radius: var(--radius-sm); padding: 12px 16px; color: #fff; font-size: 14px; outline: none;">
-                    <button type="submit" id="gsheetsSubmitBtn" class="btn btn-primary" style="padding: 12px 24px;">
+                    <input type="url" id="gsheetsUrlInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" data-i18n-placeholder="gsheets_placeholder" required style="flex: 1; min-width: 280px; background: rgba(10, 15, 30, 0.8); border: 1px solid var(--border-active); border-radius: var(--radius-sm); padding: 12px 16px; color: #fff; font-size: 14px; outline: none;">
+                    <button type="submit" id="gsheetsSubmitBtn" class="btn btn-primary" style="padding: 12px 24px;" data-i18n="gsheets_submit">
                         ⚡ Ingest & Model
                     </button>
                 </form>
-                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 14px;">
-                    ℹ️ Sharing setting must be set to <em>"Anyone with the link can view"</em>.
+                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 14px;" data-i18n="gsheets_hint">
+                    ℹ️ Sharing setting must be set to "Anyone with the link can view".
                 </div>
             </div>
 
             <!-- Multi-Domain Demo Presets -->
             <div class="demo-presets-container">
-                <span class="demo-presets-title">Or test with multi-domain demo presets:</span>
+                <span class="demo-presets-title" data-i18n="demo_presets_title">Or test with multi-domain demo presets:</span>
                 <div class="demo-pills">
-                    <button type="button" class="demo-pill-btn" data-domain="sales">🛍️ Sales & Orders</button>
-                    <button type="button" class="demo-pill-btn" data-domain="marketing">📣 Marketing & Paid Media</button>
-                    <button type="button" class="demo-pill-btn" data-domain="hr">👥 HR & People Ops</button>
-                    <button type="button" class="demo-pill-btn" data-domain="inventory">📦 Inventory & Supply Chain</button>
+                    <button type="button" class="demo-pill-btn" data-domain="sales" data-i18n="demo_sales">🛍️ Sales & Orders</button>
+                    <button type="button" class="demo-pill-btn" data-domain="marketing" data-i18n="demo_marketing">📣 Marketing & Paid Media</button>
+                    <button type="button" class="demo-pill-btn" data-domain="hr" data-i18n="demo_hr">👥 HR & People Ops</button>
+                    <button type="button" class="demo-pill-btn" data-domain="inventory" data-i18n="demo_inventory">📦 Inventory & Supply Chain</button>
                 </div>
             </div>
 
             <div class="trust-footer">
                 <div class="trust-item">
                     <span>🔒</span>
-                    <span>Ephemeral Retention: Auto-expires in 2h or purge anytime with 1 click</span>
+                    <span data-i18n="footer_ttl">Ephemeral Retention: Auto-expires in 2h or purge anytime with 1 click</span>
                 </div>
                 <div class="trust-item">
                     <span>⚡</span>
-                    <span>Instant DAX & Power Query M generation</span>
+                    <span data-i18n="footer_dax">Instant DAX & Power Query M generation</span>
                 </div>
                 <div class="trust-item">
                     <span>✉️</span>
-                    <span>Support: <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a></span>
+                    <span><span data-i18n="footer_support_label">Support:</span> <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a></span>
                 </div>
             </div>
         </div>
@@ -142,18 +147,18 @@
         <!-- Loading State Card -->
         <div id="loadingCard" class="loading-card">
             <div class="spinner"></div>
-            <h3 style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: #fff;">
+            <h3 style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: #fff;" data-i18n="loading_title">
                 Analyzing, Classifying & Healing Dataset...
             </h3>
-            <p id="loadingFileName" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">
+            <p id="loadingFileName" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;" data-i18n="loading_sub">
                 Processing spreadsheet
             </p>
             <div class="loading-steps">
-                <span class="step-item active">1. Identifying Domain</span>
+                <span class="step-item active" data-i18n="loading_step1">1. Identifying Domain</span>
                 <span>→</span>
-                <span class="step-item active">2. Purging Trailer Rows</span>
+                <span class="step-item active" data-i18n="loading_step2">2. Purging Trailer Rows</span>
                 <span>→</span>
-                <span class="step-item active">3. Modeling Domain DAX</span>
+                <span class="step-item active" data-i18n="loading_step3">3. Modeling Domain DAX</span>
             </div>
         </div>
 
@@ -172,49 +177,49 @@
             <div class="action-banner">
                 <div class="banner-left">
                     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap;">
-                        <h2>Dataset Cleansed & Modeled</h2>
+                        <h2 data-i18n="results_title">Dataset Cleansed & Modeled</h2>
                         <span id="domainBadge" class="domain-pill">🛍️ Sales & E-Commerce (96% match)</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13px;">
-                        <span>Source: <strong id="activeFileBadge" style="color: #a5b4fc;">sample.xlsx</strong></span>
+                        <span><span data-i18n="label_source">Source:</span> <strong id="activeFileBadge" style="color: #a5b4fc;">sample.xlsx</strong></span>
                         <div id="sheetPickerWrap" style="display: none; align-items: center; gap: 6px;">
-                            <label for="sheetSelect" style="color: var(--text-muted);">Sheet Tab:</label>
+                            <label for="sheetSelect" style="color: var(--text-muted);" data-i18n="label_sheet_tab">Sheet Tab:</label>
                             <select id="sheetSelect" class="domain-select" style="min-width: 130px;"></select>
                         </div>
                         <div class="domain-switcher-wrap">
-                            <label for="domainSelect" style="color: var(--text-muted);">Switch Model:</label>
+                            <label for="domainSelect" style="color: var(--text-muted);" data-i18n="label_switch_model">Switch Model:</label>
                             <select id="domainSelect" class="domain-select">
-                                <option value="sales">🛍️ Sales & Orders</option>
-                                <option value="marketing">📣 Marketing & Ads</option>
-                                <option value="hr">👥 HR & People Ops</option>
-                                <option value="inventory">📦 Inventory & Supply</option>
-                                <option value="finance">💳 Finance & Accounting</option>
+                                <option value="sales" data-i18n="opt_sales">🛍️ Sales & Orders</option>
+                                <option value="marketing" data-i18n="opt_marketing">📣 Marketing & Ads</option>
+                                <option value="hr" data-i18n="opt_hr">👥 HR & People Ops</option>
+                                <option value="inventory" data-i18n="opt_inventory">📦 Inventory & Supply</option>
+                                <option value="finance" data-i18n="opt_finance">💳 Finance & Accounting</option>
                             </select>
                         </div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                    <button id="resetUploadBtn" class="btn btn-secondary">Upload Another</button>
-                    <a id="previewDashboardBtn" href="#" target="_blank" class="btn btn-primary" title="Open responsive executive dashboard in new browser tab">📊 Executive Preview</a>
-                    <button id="downloadZipBtn" class="btn btn-emerald">📥 Download Power BI Starter Kit (.zip)</button>
-                    <button id="sendTelegramBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;" title="Dispatch executive digest and dashboard to Telegram">✈️ Send to Telegram</button>
-                    <button id="purgeDataBtn" class="btn btn-danger-outline" title="Permanently wipe all session data from server RAM and disk">🔒 Purge Data</button>
+                    <button id="resetUploadBtn" class="btn btn-secondary" data-i18n="btn_upload_another">Upload Another</button>
+                    <a id="previewDashboardBtn" href="#" target="_blank" class="btn btn-primary" data-i18n="btn_exec_preview" data-i18n-title="btn_exec_preview_title" title="Open responsive executive dashboard in new browser tab">📊 Executive Preview</a>
+                    <button id="downloadZipBtn" class="btn btn-emerald" data-i18n="btn_download_zip">📥 Download Power BI Starter Kit (.zip)</button>
+                    <button id="sendTelegramBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;" data-i18n="btn_send_telegram" data-i18n-title="btn_send_telegram_title" title="Dispatch executive digest and dashboard to Telegram">✈️ Send to Telegram</button>
+                    <button id="purgeDataBtn" class="btn btn-danger-outline" data-i18n="btn_purge_data" data-i18n-title="btn_purge_data_title" title="Permanently wipe all session data from server RAM and disk">🔒 Purge Data</button>
                 </div>
             </div>
 
             <!-- Tab Navigation -->
             <nav class="tab-navigation" aria-label="Analysis Tabs">
-                <button class="tab-btn active" data-tab="tabDashboard">
-                    <span>📊</span> Executive Dashboard
+                <button class="tab-btn active" data-tab="tabDashboard" data-i18n="tab_dashboard_full">
+                    📊 Executive Dashboard
                 </button>
-                <button class="tab-btn" data-tab="tabAudit">
-                    <span>🛡️</span> Self-Healing Audit Trail
+                <button class="tab-btn" data-tab="tabAudit" data-i18n="tab_audit_full">
+                    🛡️ Self-Healing Audit Trail
                 </button>
-                <button class="tab-btn" data-tab="tabDax">
-                    <span>📐</span> Power BI & DAX Studio
+                <button class="tab-btn" data-tab="tabDax" data-i18n="tab_dax_full">
+                    📐 Power BI & DAX Studio
                 </button>
-                <button class="tab-btn" data-tab="tabData">
-                    <span>📋</span> Clean Data Explorer
+                <button class="tab-btn" data-tab="tabData" data-i18n="tab_data_full">
+                    📋 Clean Data Explorer
                 </button>
             </nav>
 
@@ -231,13 +236,13 @@
                 <!-- Charts Grid -->
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <h3 id="chart1Title">Primary Metric Breakdown</h3>
+                        <h3 id="chart1Title" data-i18n="chart1_default">Primary Metric Breakdown</h3>
                         <div style="position: relative; height: 260px;">
                             <canvas id="chart1Canvas"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h3 id="chart2Title">Distribution Breakdown</h3>
+                        <h3 id="chart2Title" data-i18n="chart2_default">Distribution Breakdown</h3>
                         <div style="position: relative; height: 260px;">
                             <canvas id="chart2Canvas"></canvas>
                         </div>
@@ -255,10 +260,10 @@
             <!-- Tab 3: Power BI & DAX Studio -->
             <section id="tabDax" class="tab-panel">
                 <div style="margin-bottom: 24px;">
-                    <h3 id="daxDomainTitle" style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                    <h3 id="daxDomainTitle" style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;" data-i18n="dax_default_title">
                         Domain-Tailored DAX Measures
                     </h3>
-                    <p id="daxDomainSub" style="font-size: 13px; color: var(--text-muted);">
+                    <p id="daxDomainSub" style="font-size: 13px; color: var(--text-muted);" data-i18n="dax_default_sub">
                         Production business formulas ready for Power BI Desktop.
                     </p>
                 </div>
@@ -267,17 +272,17 @@
                 </div>
 
                 <div style="margin-top: 36px; margin-bottom: 16px;">
-                    <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                    <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; margin-bottom: 6px;" data-i18n="pq_title">
                         Power Query (M) Script
                     </h3>
-                    <p style="font-size: 13px; color: var(--text-muted);">
+                    <p style="font-size: 13px; color: var(--text-muted);" data-i18n="pq_sub">
                         Paste into Power BI Advanced Editor to load with automated column typing.
                     </p>
                 </div>
                 <div class="code-card">
                     <div class="code-card-header">
                         <span id="pqTableName" class="code-card-title">LoadData.m (Table: Sales)</span>
-                        <button id="copyMBtn" class="copy-btn">Copy M Script</button>
+                        <button id="copyMBtn" class="copy-btn" data-i18n="btn_copy_m">Copy M Script</button>
                     </div>
                     <pre id="powerQueryMCode" class="code-block"></pre>
                 </div>
@@ -297,13 +302,13 @@
         </main>
 
         <footer class="site-footer">
-            <span>AutoBI Studio &middot; Automated Power BI &amp; Executive Analytics</span>
+            <span data-i18n="site_footer_tagline">AutoBI Studio &middot; Automated Power BI &amp; Executive Analytics</span>
             <span class="site-footer-sep">&middot;</span>
-            <a href="{{ url_for('privacy_policy') }}" class="support-link">Privacy Policy</a>
+            <a href="{{ url_for('privacy_policy') }}" class="support-link" data-i18n="link_privacy">Privacy Policy</a>
             <span class="site-footer-sep">&middot;</span>
-            <a href="{{ url_for('terms_of_service') }}" class="support-link">Terms of Service</a>
+            <a href="{{ url_for('terms_of_service') }}" class="support-link" data-i18n="link_terms">Terms of Service</a>
             <span class="site-footer-sep">&middot;</span>
-            <span>Need help? <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a></span>
+            <span><span data-i18n="site_footer_help">Need help?</span> <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a></span>
         </footer>
 
         <!-- Workspace Authentication Gate (Progressive Modal Overlay) -->
@@ -312,33 +317,33 @@
                 <button type="button" id="closeAuthModalBtn" class="auth-modal-close" aria-label="Close modal">&times;</button>
                 <div class="auth-modal-header">
                     <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img brand-logo-modal" width="52" height="52">
-                    <h3>Unlock AutoBI Workspace</h3>
-                    <p>Sign in with your work email and workspace passcode to analyze datasets, export Power BI packs, and dispatch reports.</p>
+                    <h3 data-i18n="auth_modal_title">Unlock AutoBI Workspace</h3>
+                    <p data-i18n="auth_modal_sub">Sign in with your work email and workspace passcode to analyze datasets, export Power BI packs, and dispatch reports.</p>
                 </div>
                 <form id="authForm" class="auth-form">
                     <div class="auth-field">
-                        <label for="authEmailInput">Work Email</label>
-                        <input type="email" id="authEmailInput" placeholder="analyst@company.com" required value="analyst@enterprise.local">
+                        <label for="authEmailInput" data-i18n="auth_email_label">Work Email</label>
+                        <input type="email" id="authEmailInput" placeholder="analyst@company.com" data-i18n-placeholder="auth_email_placeholder" required value="analyst@enterprise.local">
                     </div>
                     <div class="auth-field">
-                        <label for="authPasscodeInput">Workspace Access Passcode</label>
-                        <input type="password" id="authPasscodeInput" placeholder="Enter access passcode" required>
+                        <label for="authPasscodeInput" data-i18n="auth_pass_label">Workspace Access Passcode</label>
+                        <input type="password" id="authPasscodeInput" placeholder="Enter access passcode" data-i18n-placeholder="auth_pass_placeholder" required>
                     </div>
                     <div id="authErrorMsg" class="auth-error-msg" style="display: none;"></div>
-                    <button type="submit" id="authSubmitBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; padding: 12px;">
+                    <button type="submit" id="authSubmitBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; padding: 12px;" data-i18n="auth_submit_btn">
                         🔓 Unlock Workspace
                     </button>
                 </form>
                 <div class="auth-footer">
-                    🔒 Protected by isolated multi-worker session security & TLS encryption.
+                    <span data-i18n="auth_footer_sec">🔒 Protected by isolated multi-worker session security & TLS encryption.</span>
                     <div class="auth-support-line">
-                        Need workspace access or support? <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>
+                        <span data-i18n="auth_footer_support">Need workspace access or support?</span> <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>
                     </div>
                     <div class="auth-legal-line">
-                        By signing in, you agree to our
-                        <a href="{{ url_for('terms_of_service') }}" class="support-link">Terms of Service</a>
-                        and
-                        <a href="{{ url_for('privacy_policy') }}" class="support-link">Privacy Policy</a>.
+                        <span data-i18n="auth_footer_legal_prefix">By signing in, you agree to our</span>
+                        <a href="{{ url_for('terms_of_service') }}" class="support-link" data-i18n="link_terms">Terms of Service</a>
+                        <span data-i18n="auth_footer_legal_and">and</span>
+                        <a href="{{ url_for('privacy_policy') }}" class="support-link" data-i18n="link_privacy">Privacy Policy</a>.
                     </div>
                 </div>
             </div>
@@ -349,24 +354,24 @@
             <div class="auth-modal-card" style="max-width: 520px;">
                 <div class="auth-modal-header">
                     <div style="font-size: 32px; margin-bottom: 6px;">✈️</div>
-                    <h3>Telegram Executive Digest</h3>
-                    <p>Dispatch executive KPI summary and interactive HTML dashboard directly to Telegram.</p>
+                    <h3 data-i18n="tg_modal_title">Telegram Executive Digest</h3>
+                    <p data-i18n="tg_modal_sub">Dispatch executive KPI summary and interactive HTML dashboard directly to Telegram.</p>
                 </div>
 
                 <!-- 1-Click Connect Box -->
                 <div id="tgDirectConnectBox" style="background: rgba(34, 158, 217, 0.12); border: 1px solid rgba(34, 158, 217, 0.35); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 14px;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                        <span style="font-weight: 700; font-size: 13px; color: #38bdf8;">📱 1-Click Send to My Telegram</span>
-                        <span id="tgDetectBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 12px; background: rgba(255,255,255,0.08); color: var(--text-muted);">Auto-detecting...</span>
+                        <span style="font-weight: 700; font-size: 13px; color: #38bdf8;" data-i18n="tg_direct_title">📱 1-Click Send to My Telegram</span>
+                        <span id="tgDetectBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 12px; background: rgba(255,255,255,0.08); color: var(--text-muted);" data-i18n="tg_detecting">Auto-detecting...</span>
                     </div>
-                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.4;">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.4;" data-i18n-html="tg_direct_desc">
                         No need to find your ID! Just tap below and press <b>START</b> in Telegram:
                     </p>
                     <div style="display: flex; gap: 8px; align-items: center;">
                         <a id="tgDirectStartLink" href="https://t.me/auto_bibot" target="_blank" class="btn btn-primary" style="flex: 1; padding: 8px 14px; font-size: 13px; background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9; text-align: center; text-decoration: none;">
                             🚀 Open @auto_bibot & Start
                         </a>
-                        <button type="button" id="tgCheckConnectBtn" class="btn btn-secondary" style="padding: 8px 12px; font-size: 12px;" title="Check connection now">
+                        <button type="button" id="tgCheckConnectBtn" class="btn btn-secondary" style="padding: 8px 12px; font-size: 12px;" title="Check connection now" data-i18n="tg_check_btn">
                             🔄 Check
                         </button>
                     </div>
@@ -377,7 +382,7 @@
 
                 <!-- Recent chats quick-select (if any) -->
                 <div id="tgRecentChatsWrap" style="display: none; margin-bottom: 14px;">
-                    <div style="font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">Recent Chats:</div>
+                    <div style="font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;" data-i18n="tg_recent_chats">Recent Chats:</div>
                     <div id="tgRecentPills" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
                 </div>
 
@@ -388,9 +393,9 @@
                 <form id="telegramDispatchForm" class="auth-form">
                     <!-- Additional Recipients (Channels, Groups, Teammates) -->
                     <div class="auth-field">
-                        <label for="telegramTargetsInput">Recipients (Personal Chat, Channel, or Group Links)</label>
-                        <textarea id="telegramTargetsInput" rows="2" placeholder="e.g. https://t.me/cfo_channel, @executive_board, @teammate" style="resize: vertical; font-size: 13px;"></textarea>
-                        <span class="auth-hint">
+                        <label for="telegramTargetsInput" data-i18n="tg_recipients_label">Recipients (Personal Chat, Channel, or Group Links)</label>
+                        <textarea id="telegramTargetsInput" rows="2" placeholder="e.g. https://t.me/cfo_channel, @executive_board, @teammate" data-i18n-placeholder="tg_recipients_placeholder" style="resize: vertical; font-size: 13px;"></textarea>
+                        <span class="auth-hint" data-i18n-html="tg_recipients_hint">
                             Accepts Telegram links (<code>https://t.me/my_channel</code>), <code>@channel_username</code>, or personal usernames. Separate multiple targets with commas or newlines.
                         </span>
                     </div>
@@ -398,19 +403,20 @@
                     <div id="telegramStatusMsg" class="auth-error-msg" style="display: none;"></div>
 
                     <div style="display: flex; gap: 10px; margin-top: 8px;">
-                        <button type="button" id="closeTelegramModalBtn" class="btn btn-secondary" style="flex: 1; padding: 11px;">Cancel</button>
-                        <button type="submit" id="telegramSubmitBtn" class="btn btn-primary" style="flex: 2; padding: 11px; background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;">
+                        <button type="button" id="closeTelegramModalBtn" class="btn btn-secondary" style="flex: 1; padding: 11px;" data-i18n="tg_cancel">Cancel</button>
+                        <button type="submit" id="telegramSubmitBtn" class="btn btn-primary" style="flex: 2; padding: 11px; background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;" data-i18n="tg_send">
                             ✈️ Send Report
                         </button>
                     </div>
                 </form>
-                <div class="auth-footer" style="margin-top: 14px;">
+                <div class="auth-footer" style="margin-top: 14px;" data-i18n="tg_footer">
                     📎 Includes interactive HTML dashboard attachment readable on iOS, Android & desktop without Power BI.
                 </div>
             </div>
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
