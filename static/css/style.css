@@ -107,6 +107,21 @@ body {
   font-family: var(--font-heading);
 }
 
+.brand-logo-img {
+  width: 44px;
+  height: 44px;
+  display: block;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 22px rgba(99, 102, 241, 0.45);
+}
+
+.brand-logo-modal {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+}
+
 .brand-meta h1 {
   font-family: var(--font-heading);
   font-size: 22px;

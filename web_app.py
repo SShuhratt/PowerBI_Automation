@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import functools
 import pandas as pd
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from cleaner import SelfHealingCleaner
@@ -801,6 +801,26 @@ def privacy_policy():
 def terms_of_service():
     """Render the AutoBI Studio Terms of Service page."""
     return render_template("legal.html", **LEGAL_DOCUMENTS["terms"])
+
+
+@app.route("/favicon.ico")
+def favicon():
+    """Serve the multi-resolution ICO favicon at the root path."""
+    return send_from_directory(
+        os.path.join(app.root_path, "static", "img"),
+        "favicon.ico",
+        mimetype="image/vnd.microsoft.icon",
+    )
+
+
+@app.route("/apple-touch-icon.png")
+def apple_touch_icon():
+    """Serve the iOS/Safari touch icon at the root path."""
+    return send_from_directory(
+        os.path.join(app.root_path, "static", "img"),
+        "apple-touch-icon.png",
+        mimetype="image/png",
+    )
 
 
 @app.route("/api/auth/status")

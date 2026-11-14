@@ -141,6 +141,7 @@ def generate_html_dashboard(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoBI Executive Dashboard — {safe_filename}</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='15' fill='url(%23g)'/%3E%3Cpath d='M19.5 13.5L21.3 18.2L26 20L21.3 21.8L19.5 26.5L17.7 21.8L13 20L17.7 18.2Z' fill='%236ee7b7'/%3E%3Crect x='15' y='34' width='9' height='16' rx='3' fill='%23e0f2fe'/%3E%3Crect x='27.5' y='25' width='9' height='25' rx='3' fill='%23ffffff'/%3E%3Crect x='40' y='15' width='9' height='35' rx='3' fill='%23ffffff'/%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">

@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoBI — Multi-Domain Self-Healing Spreadsheet to Power BI Engine</title>
     <meta name="description" content="Automate messy spreadsheet cleaning, domain classification, and instant Power BI semantic model & DAX measure generation across Sales, Marketing, HR, Inventory, and Finance.">
+    <meta name="theme-color" content="#090d16">
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16x16.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
     <!-- Google Fonts & Chart.js -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +24,7 @@
         <!-- App Header -->
         <header class="app-header">
             <div class="brand-group">
-                <div class="brand-logo">BI</div>
+                <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img" width="44" height="44">
                 <div class="brand-meta">
                     <h1>AutoBI Studio</h1>
                     <p>Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
@@ -304,7 +311,7 @@
             <div class="auth-modal-card">
                 <button type="button" id="closeAuthModalBtn" class="auth-modal-close" aria-label="Close modal">&times;</button>
                 <div class="auth-modal-header">
-                    <div class="brand-logo" style="margin: 0 auto 14px;">BI</div>
+                    <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img brand-logo-modal" width="52" height="52">
                     <h3>Unlock AutoBI Workspace</h3>
                     <p>Sign in with your work email and workspace passcode to analyze datasets, export Power BI packs, and dispatch reports.</p>
                 </div>

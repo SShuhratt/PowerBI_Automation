@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" width="240" height="64" fill="none">
+  <defs>
+    <linearGradient id="autobi-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="52%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="autobi-spark" x1="14" y1="14" x2="26" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#a7f3d0"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#autobi-bg)"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="14.25" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1.5"/>
+  <path d="M19.5 13.5L21.3 18.2L26 20L21.3 21.8L19.5 26.5L17.7 21.8L13 20L17.7 18.2Z" fill="url(#autobi-spark)"/>
+  <rect x="15" y="34" width="9" height="16" rx="3" fill="#e0f2fe"/>
+  <rect x="27.5" y="25" width="9" height="25" rx="3" fill="#ffffff" fill-opacity="0.96"/>
+  <rect x="40" y="15" width="9" height="35" rx="3" fill="#ffffff"/>
+  <text x="78" y="36" fill="#f8fafc" font-family="Outfit, Inter, system-ui, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.6">AutoBI</text>
+  <text x="172" y="36" fill="#38bdf8" font-family="Outfit, Inter, system-ui, sans-serif" font-size="28" font-weight="600" letter-spacing="-0.4">Studio</text>
+  <text x="79" y="52" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="500" letter-spacing="0.4">SPREADSHEETS TO POWER BI</text>
+</svg>

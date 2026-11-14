@@ -58,7 +58,26 @@ def test_index_route():
     assert b"/privacy" in res.data
     assert b"/terms" in res.data
     assert b"support@autobi.uz" in res.data
+    assert b"autobi-icon.svg" in res.data
+    assert b"favicon.svg" in res.data
     print("[PASS] test_index_route")
+
+
+def test_brand_assets():
+    client = app.test_client()
+    for path, expected_mime in [
+        ("/favicon.ico", "image/"),
+        ("/apple-touch-icon.png", "image/png"),
+        ("/static/img/autobi-icon.svg", "image/svg+xml"),
+        ("/static/img/autobi-logo.svg", "image/svg+xml"),
+        ("/static/img/favicon.svg", "image/svg+xml"),
+        ("/static/img/favicon-32x32.png", "image/png"),
+        ("/static/site.webmanifest", "application/"),
+    ]:
+        res = client.get(path)
+        assert res.status_code == 200, f"Expected 200 on {path}, got {res.status_code}"
+        assert expected_mime in (res.content_type or ""), f"Unexpected mime for {path}: {res.content_type}"
+    print("[PASS] test_brand_assets (SVG logo, icons, favicon & manifest)")
 
 
 def test_legal_pages():
@@ -767,6 +786,7 @@ def test_cybersecurity_and_hardening():
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
+    test_brand_assets()
     test_legal_pages()
     test_api_sample()
     test_api_upload_csv()
