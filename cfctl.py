@@ -27,7 +27,10 @@ AUTOBI_DESIRED_RECORDS = [
     {"type": "A", "name": "webmail.autobi.uz", "content": AUTOBI_ESKIZ_IP, "proxied": False, "ttl": 14400},
     {"type": "A", "name": "mail.autobi.uz", "content": AUTOBI_ESKIZ_IP, "proxied": False, "ttl": 3600},
     {"type": "TXT", "name": "autobi.uz", "content": f"v=spf1 include:_spf.mx.cloudflare.net +ipv4:{AUTOBI_ESKIZ_IP} ~all", "ttl": 1},
-    {"type": "TXT", "name": "_dmarc.autobi.uz", "content": "v=DMARC1; p=none;", "ttl": 3600},
+    {"type": "TXT", "name": "autobi.uz", "content": '"brevo-code:a5265ee728dde088ab9cf668ba3b02b8"', "ttl": 3600},
+    {"type": "CNAME", "name": "brevo1._domainkey.autobi.uz", "content": "b1.autobi-uz.dkim.brevo.com", "proxied": False, "ttl": 3600},
+    {"type": "CNAME", "name": "brevo2._domainkey.autobi.uz", "content": "b2.autobi-uz.dkim.brevo.com", "proxied": False, "ttl": 3600},
+    {"type": "TXT", "name": "_dmarc.autobi.uz", "content": '"v=DMARC1; p=none; rua=mailto:rua@dmarc.brevo.com"', "ttl": 3600},
 ]
 
 
