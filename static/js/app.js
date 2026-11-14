@@ -34,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const purgeDataBtn = document.getElementById('purgeDataBtn');
     const purgeBanner = document.getElementById('purgeBanner');
     const authGateModal = document.getElementById('authGateModal');
+    const closeAuthModalBtn = document.getElementById('closeAuthModalBtn');
+    const openAuthBtn = document.getElementById('openAuthBtn');
     const authForm = document.getElementById('authForm');
     const authEmailInput = document.getElementById('authEmailInput');
     const authPasscodeInput = document.getElementById('authPasscodeInput');
@@ -61,18 +63,51 @@ document.addEventListener('DOMContentLoaded', () => {
     const telegramConfigStatus = document.getElementById('telegramConfigStatus');
     const telegramSubmitBtn = document.getElementById('telegramSubmitBtn');
 
-    // Check workspace authentication status
+    // Progressive Auth State (UX: do not block initial landing view)
+    let authEnabled = true;
+    let isAuthenticated = false;
+    let pendingAuthAction = null;
+
+    function openAuthModal(actionAfterLogin = null) {
+        pendingAuthAction = actionAfterLogin;
+        if (authErrorMsg) authErrorMsg.style.display = 'none';
+        if (authGateModal) authGateModal.style.display = 'flex';
+        if (authPasscodeInput) {
+            authPasscodeInput.value = '';
+            setTimeout(() => authPasscodeInput.focus(), 50);
+        }
+    }
+
+    function closeAuthModal() {
+        if (authGateModal) authGateModal.style.display = 'none';
+        pendingAuthAction = null;
+    }
+
+    function requireWorkspaceAuth(actionFn) {
+        if (!authEnabled || isAuthenticated) {
+            actionFn();
+        } else {
+            openAuthModal(actionFn);
+        }
+    }
+
+    // Check workspace authentication status without popup gate on load
     async function checkAuthStatus() {
         try {
             const res = await fetch('/api/auth/status');
             const data = await res.json();
+            authEnabled = Boolean(data.auth_enabled);
             if (data.auth_enabled) {
                 if (!data.authenticated) {
-                    if (authGateModal) authGateModal.style.display = 'flex';
+                    isAuthenticated = false;
+                    if (authGateModal) authGateModal.style.display = 'none';
+                    if (openAuthBtn) openAuthBtn.style.display = 'inline-flex';
                     if (userStatusBadge) userStatusBadge.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'none';
                 } else {
+                    isAuthenticated = true;
                     if (authGateModal) authGateModal.style.display = 'none';
+                    if (openAuthBtn) openAuthBtn.style.display = 'none';
                     if (userStatusBadge) {
                         userStatusBadge.style.display = 'inline-flex';
                         if (userEmailSpan) userEmailSpan.textContent = data.user || 'Authenticated';
@@ -80,12 +115,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (logoutBtn) logoutBtn.style.display = 'inline-flex';
                 }
             } else {
+                isAuthenticated = true;
                 if (authGateModal) authGateModal.style.display = 'none';
+                if (openAuthBtn) openAuthBtn.style.display = 'none';
             }
         } catch (e) {
             console.error('Failed to verify auth status', e);
         }
     }
+
+    if (openAuthBtn) {
+        openAuthBtn.addEventListener('click', () => openAuthModal(null));
+    }
+
+    if (closeAuthModalBtn) {
+        closeAuthModalBtn.addEventListener('click', closeAuthModal);
+    }
+
+    if (authGateModal) {
+        authGateModal.addEventListener('click', (e) => {
+            if (e.target === authGateModal) closeAuthModal();
+        });
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && authGateModal && authGateModal.style.display === 'flex') {
+            closeAuthModal();
+        }
+    });
 
     if (authForm) {
         authForm.addEventListener('submit', async (e) => {
@@ -102,12 +159,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 const data = await res.json();
                 if (data.success) {
+                    isAuthenticated = true;
+                    const resumeAction = pendingAuthAction;
+                    pendingAuthAction = null;
                     if (authGateModal) authGateModal.style.display = 'none';
+                    if (openAuthBtn) openAuthBtn.style.display = 'none';
                     if (userStatusBadge) {
                         userStatusBadge.style.display = 'inline-flex';
                         if (userEmailSpan) userEmailSpan.textContent = data.user || email;
                     }
                     if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                    if (typeof resumeAction === 'function') {
+                        resumeAction();
+                    }
                 } else {
                     if (authErrorMsg) {
                         authErrorMsg.textContent = data.error || 'Authentication failed.';
@@ -391,32 +455,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    async function ingestGoogleSheetUrl(url) {
+        showLoading('Connecting and analyzing Google Sheet...');
+        try {
+            const res = await fetch('/api/ingest-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url })
+            });
+            const data = await res.json();
+            if (res.status === 401 && data.auth_required) {
+                isAuthenticated = false;
+                uploadCard.style.display = 'block';
+                openAuthModal(() => ingestGoogleSheetUrl(url));
+                return;
+            }
+            if (data.success) {
+                renderResults(data);
+            } else {
+                alert('Google Sheets Error: ' + (data.error || 'Failed to ingest sheet.'));
+                uploadCard.style.display = 'block';
+            }
+        } catch (err) {
+            alert('Connection Error: ' + err.message);
+            uploadCard.style.display = 'block';
+        } finally {
+            hideLoading();
+        }
+    }
+
     if (gsheetsForm) {
-        gsheetsForm.addEventListener('submit', async (e) => {
+        gsheetsForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const url = gsheetsUrlInput ? gsheetsUrlInput.value.trim() : '';
             if (!url) return;
-
-            showLoading('Connecting and analyzing Google Sheet...');
-            try {
-                const res = await fetch('/api/ingest-url', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
-                });
-                const data = await res.json();
-                if (data.success) {
-                    renderResults(data);
-                } else {
-                    alert('Google Sheets Error: ' + (data.error || 'Failed to ingest sheet.'));
-                    uploadCard.style.display = 'block';
-                }
-            } catch (err) {
-                alert('Connection Error: ' + err.message);
-                uploadCard.style.display = 'block';
-            } finally {
-                hideLoading();
-            }
+            requireWorkspaceAuth(() => ingestGoogleSheetUrl(url));
         });
     }
 
@@ -442,14 +515,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const dt = e.dataTransfer;
             const files = dt.files;
             if (files.length > 0) {
-                currentLastFile = files[0];
-                handleFileUpload(files[0]);
+                const droppedFile = files[0];
+                requireWorkspaceAuth(() => {
+                    currentLastFile = droppedFile;
+                    handleFileUpload(droppedFile);
+                });
             }
         });
 
         dropzone.addEventListener('click', (e) => {
             if (e.target !== browseBtn && e.target !== sampleBtn && !sampleBtn.contains(e.target) && !e.target.classList.contains('demo-pill-btn')) {
-                fileInput.click();
+                requireWorkspaceAuth(() => fileInput.click());
             }
         });
     }
@@ -457,15 +533,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (browseBtn) {
         browseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            fileInput.click();
+            requireWorkspaceAuth(() => fileInput.click());
         });
     }
 
     if (fileInput) {
         fileInput.addEventListener('change', () => {
             if (fileInput.files.length > 0) {
-                currentLastFile = fileInput.files[0];
-                handleFileUpload(fileInput.files[0]);
+                const chosenFile = fileInput.files[0];
+                requireWorkspaceAuth(() => {
+                    currentLastFile = chosenFile;
+                    handleFileUpload(chosenFile);
+                });
             }
         });
     }
@@ -473,7 +552,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sampleBtn) {
         sampleBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            handleSampleRun('sales');
+            requireWorkspaceAuth(() => handleSampleRun('sales'));
         });
     }
 
@@ -482,7 +561,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const domain = btn.getAttribute('data-domain');
-            handleSampleRun(domain);
+            requireWorkspaceAuth(() => handleSampleRun(domain));
         });
     });
 
@@ -534,6 +613,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: formData
             });
             const data = await res.json();
+            if (res.status === 401 && data.auth_required) {
+                isAuthenticated = false;
+                uploadCard.style.display = 'block';
+                openAuthModal(() => handleFileUpload(file, domainOverride, sheetOverride));
+                return;
+            }
             if (data.success) {
                 renderResults(data);
             } else {
@@ -560,6 +645,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ domain: domain })
             });
             const data = await res.json();
+            if (res.status === 401 && data.auth_required) {
+                isAuthenticated = false;
+                uploadCard.style.display = 'block';
+                openAuthModal(() => handleSampleRun(domain));
+                return;
+            }
             if (data.success) {
                 renderResults(data);
             } else {

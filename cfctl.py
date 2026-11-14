@@ -26,8 +26,7 @@ AUTOBI_DESIRED_RECORDS = [
     {"type": "A", "name": "ftp.autobi.uz", "content": AUTOBI_ESKIZ_IP, "proxied": False, "ttl": 14400},
     {"type": "A", "name": "webmail.autobi.uz", "content": AUTOBI_ESKIZ_IP, "proxied": False, "ttl": 14400},
     {"type": "A", "name": "mail.autobi.uz", "content": AUTOBI_ESKIZ_IP, "proxied": False, "ttl": 3600},
-    {"type": "MX", "name": "autobi.uz", "content": "mail.autobi.uz", "priority": 10, "ttl": 3600},
-    {"type": "TXT", "name": "autobi.uz", "content": f"v=spf1 +a +mx +ipv4:{AUTOBI_ESKIZ_IP} ~all", "ttl": 3600},
+    {"type": "TXT", "name": "autobi.uz", "content": f"v=spf1 include:_spf.mx.cloudflare.net +ipv4:{AUTOBI_ESKIZ_IP} ~all", "ttl": 1},
     {"type": "TXT", "name": "_dmarc.autobi.uz", "content": "v=DMARC1; p=none;", "ttl": 3600},
 ]
 
@@ -283,22 +282,92 @@ def cmd_ssl(args):
 
 
 def cmd_email_status(args):
-    zid = resolve_zone_id(args.domain)
+    q = urllib.parse.urlencode({"name": args.domain.strip().rstrip(".").lower()})
+    zones = cf_request(f"/zones?{q}").get("result", [])
+    if not zones:
+        raise RuntimeError(f"Zone '{args.domain}' was not found.")
+    zone = zones[0]
+    zid = zone["id"]
+    aid = zone.get("account", {}).get("id")
+
     records = cf_request(f"/zones/{zid}/dns_records?per_page=100").get("result", [])
     print(f"=== Email DNS Records for {args.domain} ===")
     for r in records:
         if r["type"] in ("MX", "TXT") or any(k in r["name"] for k in ("mail", "webmail", "dkim", "dmarc")):
             extra = f" (prio={r['priority']})" if r.get("priority") is not None else ""
             prox = "orange" if r.get("proxied") else "grey"
-            print(f"  {r['type']:<5} {r['name']:<30} {r['content']}{extra} [{prox}]")
+            print(f"  {r['type']:<5} {r['name']:<32} {r['content'][:60]}{extra} [{prox}]")
 
     try:
         routing = cf_request(f"/zones/{zid}/email/routing")
         er = routing.get("result", {})
         print(f"\n=== Cloudflare Email Routing ===")
         print(f"  Enabled: {er.get('enabled', False)} | Status: {er.get('status', 'unknown')}")
+        rules = cf_request(f"/zones/{zid}/email/routing/rules").get("result", [])
+        for rule in rules:
+            matchers = ", ".join(m.get("value", m.get("type", "")) for m in rule.get("matchers", []))
+            actions = ", ".join(
+                f"{a.get('type')}:{'/'.join(a.get('value', []))}" if a.get("value") else a.get("type", "")
+                for a in rule.get("actions", [])
+            )
+            state = "ON" if rule.get("enabled") else "OFF"
+            print(f"  [{state}] {matchers:<28} -> {actions} (id={rule.get('id')})")
     except Exception as e:
         print(f"\n[*] Email Routing status unavailable with current token scope: {e}")
+
+    if aid:
+        try:
+            addrs = cf_request(f"/accounts/{aid}/email/routing/addresses").get("result", [])
+            if addrs:
+                print(f"\n=== Verified Destination Addresses ===")
+                for a in addrs:
+                    print(f"  • {a['email']} ({a.get('status', 'unknown')})")
+        except Exception:
+            pass
+
+
+def cmd_email_route_add(args):
+    q = urllib.parse.urlencode({"name": args.domain.strip().rstrip(".").lower()})
+    zones = cf_request(f"/zones?{q}").get("result", [])
+    if not zones:
+        raise RuntimeError(f"Zone '{args.domain}' was not found.")
+    zone = zones[0]
+    zid = zone["id"]
+    aid = zone.get("account", {}).get("id")
+
+    src = args.source.strip().lower()
+    if "@" not in src:
+        src = f"{src}@{args.domain.strip().rstrip('.').lower()}"
+    dst = args.destination.strip().lower()
+
+    # Check if destination address is already registered/verified on account
+    if aid:
+        addrs = cf_request(f"/accounts/{aid}/email/routing/addresses").get("result", [])
+        match_addr = next((a for a in addrs if a["email"].lower() == dst), None)
+        if not match_addr:
+            cf_request(f"/accounts/{aid}/email/routing/addresses", method="POST", data={"email": dst})
+            print(f"[*] Sent Cloudflare verification email to destination: {dst} (must click verify link)")
+        elif match_addr.get("status") != "verified":
+            print(f"[!] Destination {dst} is pending verification in Cloudflare.")
+
+    # Upsert custom routing rule matching this address
+    rules = cf_request(f"/zones/{zid}/email/routing/rules").get("result", [])
+    existing = next(
+        (r for r in rules if any(m.get("type") == "literal" and m.get("value", "").lower() == src for m in r.get("matchers", []))),
+        None,
+    )
+    payload = {
+        "name": f"Route {src} -> {dst}",
+        "enabled": True,
+        "matchers": [{"type": "literal", "field": "to", "value": src}],
+        "actions": [{"type": "forward", "value": [dst]}],
+    }
+    if existing:
+        cf_request(f"/zones/{zid}/email/routing/rules/{existing['id']}", method="PUT", data=payload)
+        print(f"[UPDATED] Email route: {src} -> {dst}")
+    else:
+        cf_request(f"/zones/{zid}/email/routing/rules", method="POST", data=payload)
+        print(f"[CREATED] Email route: {src} -> {dst}")
 
 
 def cmd_setup_autobi(args):
@@ -389,6 +458,10 @@ def build_parser() -> argparse.ArgumentParser:
     email_sub = email_p.add_subparsers(dest="email_cmd", required=True)
     p_es = email_sub.add_parser("status")
     p_es.add_argument("domain")
+    p_er = email_sub.add_parser("route-add", help="Create or update a forwarding alias (e.g. support@autobi.uz)")
+    p_er.add_argument("domain")
+    p_er.add_argument("--from", dest="source", required=True, help="Alias or local part (e.g. support or support@autobi.uz)")
+    p_er.add_argument("--to", dest="destination", required=True, help="Destination email address")
 
     setup_p = sub.add_parser("setup-autobi", help="Sync all autobi.uz DNS + SSL settings to Cloudflare")
     setup_p.add_argument("--dry-run", action="store_true")
@@ -418,6 +491,8 @@ def main():
         elif args.command == "email":
             if args.email_cmd == "status":
                 cmd_email_status(args)
+            elif args.email_cmd == "route-add":
+                cmd_email_route_add(args)
         elif args.command == "setup-autobi":
             cmd_setup_autobi(args)
         elif args.command == "export-bind":
