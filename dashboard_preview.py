@@ -19,7 +19,8 @@ def generate_html_dashboard(
     anomalies: list = None,
     anomaly_summary: dict = None,
     fx_info: dict = None,
-    pareto_info: dict = None
+    pareto_info: dict = None,
+    display_labels: dict = None
 ) -> str:
     domain_label = html.escape(str(domain_info.get("label", "Business Analytics")))
     domain_icon = html.escape(str(domain_info.get("icon", "📊")))
@@ -28,6 +29,7 @@ def generate_html_dashboard(
     anomaly_summary = anomaly_summary or {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False}
     fx_info = fx_info or {}
     pareto_info = pareto_info or {}
+    display_labels = display_labels or {}
 
     # Multi-currency banner HTML
     fx_banner_html = ""
@@ -127,7 +129,13 @@ def generate_html_dashboard(
         """
 
     # Format Table records
-    table_headers_html = "".join([f'<th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">{html.escape(str(c))}</th>' for c in df.columns[:10]])
+    def _col_header(col_name: str) -> str:
+        col_str = str(col_name)
+        if col_str in display_labels and str(display_labels[col_str]).strip():
+            return str(display_labels[col_str]).strip()
+        return col_str[4:].replace("_", " ") if col_str.startswith("col_") else col_str.replace("_", " ")
+
+    table_headers_html = "".join([f'<th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">{html.escape(_col_header(c))}</th>' for c in df.columns[:10]])
     table_rows_html = ""
     for _, row in df.head(50).iterrows():
         cells = "".join([f'<td class="px-4 py-2.5 text-sm text-slate-700 whitespace-nowrap">{html.escape(str(row[c])) if pd.notna(row[c]) else ""}</td>' for c in df.columns[:10]])
@@ -234,61 +242,44 @@ def generate_html_dashboard(
 
     <script>
         const chartData = {charts_json};
-        
-        // Render Chart 1
-        if (chartData.chart1) {{
-            document.getElementById('chart1Title').textContent = chartData.chart1.title || 'Analysis';
-            const ctx1 = document.getElementById('chart1Canvas').getContext('2d');
-            new Chart(ctx1, {{
-                type: chartData.chart1.type || 'bar',
+        const palette = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#14b8a6'];
+
+        function mountPreviewChart(titleId, canvasId, cfg, defaultType) {{
+            if (!cfg) return;
+            const cType = cfg.type || defaultType;
+            const isDoughnut = cType === 'doughnut';
+            const isLine = cType === 'line';
+            document.getElementById(titleId).textContent = cfg.title || 'Analysis';
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            new Chart(ctx, {{
+                type: cType,
                 data: {{
-                    labels: Object.keys(chartData.chart1.data || {{}}),
+                    labels: Object.keys(cfg.data || {{}}),
                     datasets: [{{
-                        label: chartData.chart1.title,
-                        data: Object.values(chartData.chart1.data || {{}}),
-                        backgroundColor: chartData.chart1.type === 'doughnut' ? 
-                            ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#14b8a6'] : '#6366f1',
-                        borderRadius: 6
+                        label: cfg.series_label || cfg.title || 'Value',
+                        data: Object.values(cfg.data || {{}}),
+                        backgroundColor: isDoughnut ? palette : (isLine ? 'rgba(99, 102, 241, 0.16)' : (defaultType === 'doughnut' ? palette : '#6366f1')),
+                        borderColor: isDoughnut ? '#0f172a' : '#6366f1',
+                        borderWidth: isLine ? 2.5 : (isDoughnut ? 2 : 0),
+                        tension: isLine ? 0.35 : 0,
+                        fill: isLine,
+                        borderRadius: (isDoughnut || isLine) ? 0 : 6
                     }}]
                 }},
                 options: {{
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: {{ legend: {{ labels: {{ color: '#94a3b8' }} }} }},
-                    scales: chartData.chart1.type === 'bar' ? {{
+                    plugins: {{ legend: {{ display: isDoughnut, position: 'bottom', labels: {{ color: '#94a3b8' }} }} }},
+                    scales: isDoughnut ? {{}} : {{
                         x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }},
-                        y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
-                    }} : {{}}
+                        y: {{ beginAtZero: !isLine, ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
+                    }}
                 }}
             }});
         }}
 
-        // Render Chart 2
-        if (chartData.chart2) {{
-            document.getElementById('chart2Title').textContent = chartData.chart2.title || 'Distribution';
-            const ctx2 = document.getElementById('chart2Canvas').getContext('2d');
-            new Chart(ctx2, {{
-                type: chartData.chart2.type || 'doughnut',
-                data: {{
-                    labels: Object.keys(chartData.chart2.data || {{}}),
-                    datasets: [{{
-                        label: chartData.chart2.title,
-                        data: Object.values(chartData.chart2.data || {{}}),
-                        backgroundColor: ['#06b6d4', '#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#14b8a6'],
-                        borderRadius: 6
-                    }}]
-                }},
-                options: {{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {{ legend: {{ labels: {{ color: '#94a3b8' }} }} }},
-                    scales: chartData.chart2.type === 'bar' ? {{
-                        x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }},
-                        y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
-                    }} : {{}}
-                }}
-            }});
-        }}
+        mountPreviewChart('chart1Title', 'chart1Canvas', chartData.chart1, 'bar');
+        mountPreviewChart('chart2Title', 'chart2Canvas', chartData.chart2, 'doughnut');
     </script>
 </body>
 </html>

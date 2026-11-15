@@ -49,6 +49,7 @@ class SelfHealingCleaner:
             "dropped_rows": [],
             "inferred_calculations": [],
             "renamed_columns": {},
+            "display_labels": {},
             "datatype_conversions": {},
             "unpivoted_matrix": {"is_unpivoted": False},
             "fx_normalization": {"is_multi_currency": False},
@@ -662,6 +663,8 @@ class SelfHealingCleaner:
         original_cols = list(df.columns)
         new_cols = []
         seen = {}
+        display_labels = {}
+        seen_display = {}
         for i, col in enumerate(original_cols):
             base_clean = self._clean_column_name(col)
             if base_clean in seen:
@@ -672,8 +675,21 @@ class SelfHealingCleaner:
                 col_name = base_clean
             new_cols.append(col_name)
 
+            raw_label = re.sub(r'\s+', ' ', str(col or '').strip())
+            if not raw_label or raw_label.lower().startswith("unnamed:"):
+                human_label = f"Column {i + 1}"
+            else:
+                human_label = raw_label
+            if human_label in seen_display:
+                seen_display[human_label] += 1
+                human_label = f"{human_label} ({seen_display[human_label]})"
+            else:
+                seen_display[human_label] = 1
+            display_labels[str(col_name)] = human_label
+
         col_map = {str(orig): str(new) for orig, new in zip(original_cols, new_cols)}
         self.audit_log["renamed_columns"] = col_map
+        self.audit_log["display_labels"] = display_labels
         df.columns = new_cols
 
         # 4. Detect and Auto-Compute Missing Business Columns across Domains

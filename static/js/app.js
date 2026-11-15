@@ -922,7 +922,8 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCodeBlocks(data.dax_measures, data.power_query_m, data.domain);
 
         // 6. Clean Table
-        renderTable(data.table_columns, data.table_records);
+        const displayLabels = data.display_labels || (data.audit_log && data.audit_log.display_labels) || {};
+        renderTable(data.table_columns, data.table_records, displayLabels);
 
         // Reveal Workspace
         uploadCard.style.display = 'none';
@@ -970,76 +971,83 @@ document.addEventListener('DOMContentLoaded', () => {
         const chartGridColor = isLightTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.05)';
         const chartSurfaceBorder = isLightTheme ? '#ffffff' : '#090d16';
 
-        // Chart 1
-        const c1Config = charts.chart1;
-        const c1Title = document.getElementById('chart1Title');
-        const c1Canvas = document.getElementById('chart1Canvas');
+        function createChartInstance(cfg, canvasEl, titleEl, defaultType, multiBar) {
+            if (!cfg || !canvasEl) return null;
+            const cType = cfg.type || defaultType;
+            const isDoughnut = cType === 'doughnut';
+            const isLine = cType === 'line';
+            if (titleEl) titleEl.textContent = cfg.title || '';
+            const ctx = canvasEl.getContext('2d');
+            const labels = Object.keys(cfg.data || {});
+            const values = Object.values(cfg.data || {});
 
-        if (c1Config && c1Canvas) {
-            c1Title.textContent = c1Config.title;
-            const ctx1 = c1Canvas.getContext('2d');
-            const labels = Object.keys(c1Config.data);
-            const values = Object.values(c1Config.data);
+            let bgColor = 'rgba(99, 102, 241, 0.85)';
+            let bdColor = '#6366f1';
+            if (isDoughnut) {
+                bgColor = colors;
+                bdColor = chartSurfaceBorder;
+            } else if (isLine) {
+                const grad = ctx.createLinearGradient(0, 0, 0, canvasEl.height || 240);
+                grad.addColorStop(0, isLightTheme ? 'rgba(99, 102, 241, 0.28)' : 'rgba(99, 102, 241, 0.34)');
+                grad.addColorStop(1, 'rgba(99, 102, 241, 0.0)');
+                bgColor = grad;
+                bdColor = '#6366f1';
+            } else if (multiBar) {
+                bgColor = colors;
+                bdColor = colors;
+            }
 
-            chart1Instance = new Chart(ctx1, {
-                type: c1Config.type || 'bar',
+            return new Chart(ctx, {
+                type: cType,
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Value',
+                        label: cfg.series_label || cfg.title || 'Value',
                         data: values,
-                        backgroundColor: c1Config.type === 'doughnut' ? colors : 'rgba(99, 102, 241, 0.85)',
-                        borderColor: c1Config.type === 'doughnut' ? chartSurfaceBorder : '#6366f1',
-                        borderWidth: 1,
-                        borderRadius: 6
+                        backgroundColor: bgColor,
+                        borderColor: bdColor,
+                        borderWidth: isLine ? 2.5 : (isDoughnut ? 2 : 1),
+                        tension: isLine ? 0.35 : 0,
+                        fill: isLine,
+                        pointRadius: isLine ? (labels.length > 24 ? 2 : 3.5) : 0,
+                        pointHoverRadius: isLine ? 5.5 : 0,
+                        borderRadius: (isDoughnut || isLine) ? 0 : 6
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: c1Config.type === 'doughnut', labels: { color: chartLegendColor } }
+                        legend: {
+                            display: isDoughnut,
+                            position: 'bottom',
+                            labels: { color: chartLegendColor, padding: 12 }
+                        }
                     },
-                    scales: c1Config.type === 'doughnut' ? {} : {
-                        y: { beginAtZero: true, grid: { color: chartGridColor }, ticks: { color: chartTickColor } },
-                        x: { grid: { display: false }, ticks: { color: chartLegendColor } }
+                    cutout: isDoughnut ? '65%' : 0,
+                    scales: isDoughnut ? {} : {
+                        y: { beginAtZero: !isLine, grid: { color: chartGridColor }, ticks: { color: chartTickColor } },
+                        x: { grid: { display: false }, ticks: { color: chartLegendColor, maxRotation: 35, autoSkip: true } }
                     }
                 }
             });
         }
 
-        // Chart 2
-        const c2Config = charts.chart2;
-        const c2Title = document.getElementById('chart2Title');
-        const c2Canvas = document.getElementById('chart2Canvas');
-
-        if (c2Config && c2Canvas) {
-            c2Title.textContent = c2Config.title;
-            const ctx2 = c2Canvas.getContext('2d');
-            const labels = Object.keys(c2Config.data);
-            const values = Object.values(c2Config.data);
-
-            chart2Instance = new Chart(ctx2, {
-                type: c2Config.type || 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: values,
-                        backgroundColor: colors,
-                        borderColor: chartSurfaceBorder,
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'bottom', labels: { color: chartLegendColor, padding: 12 } }
-                    },
-                    cutout: c2Config.type === 'doughnut' ? '65%' : 0
-                }
-            });
-        }
+        // Chart 1 & Chart 2
+        chart1Instance = createChartInstance(
+            charts.chart1,
+            document.getElementById('chart1Canvas'),
+            document.getElementById('chart1Title'),
+            'bar',
+            false
+        );
+        chart2Instance = createChartInstance(
+            charts.chart2,
+            document.getElementById('chart2Canvas'),
+            document.getElementById('chart2Title'),
+            'doughnut',
+            true
+        );
     }
 
     // --- Audit Trail ---
@@ -1343,7 +1351,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Clean Data Explorer Table ---
-    function renderTable(columns, rows) {
+    function renderTable(columns, rows, displayLabels = {}) {
         const thead = document.getElementById('tableThead');
         const tbody = document.getElementById('tableTbody');
         thead.innerHTML = '';
@@ -1352,7 +1360,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const trHead = document.createElement('tr');
         columns.forEach(c => {
             const th = document.createElement('th');
-            th.textContent = c.replace(/_/g, ' ');
+            const label = displayLabels[c] || c.replace(/^col_+/, '').replace(/_/g, ' ');
+            th.textContent = label;
             trHead.appendChild(th);
         });
         thead.appendChild(trHead);

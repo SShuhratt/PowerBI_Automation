@@ -941,7 +941,41 @@ def test_custom_generic_schema_and_sticky_header():
     css_text = css_res.data.decode("utf-8")
     assert "position: sticky;" in css_text
     assert "--bg-header-sticky" in css_text
-    print("[PASS] test_custom_generic_schema_and_sticky_header (Custom dataset BI pipeline & persistent sticky header)")
+
+    # 4. Human-readable headers & meaningful custom charts (no col_/snake_case boilerplate)
+    solow_csv = (
+        "Davr,Kapital (K),Mahsulot (Y),Investitsiya (I),90% ga erishish holati\n"
+        "1,100.0,320.5,48.1,Erishilmadi\n"
+        "2,115.2,342.8,51.4,Erishilmadi\n"
+        "3,131.0,367.2,55.0,Erishilmadi\n"
+        "4,149.5,392.0,58.8,ERISHILDI (>=90%)\n"
+        "5,168.1,418.4,62.7,ERISHILDI (>=90%)\n"
+        "6,188.0,445.9,66.9,ERISHILDI (>=90%)\n"
+    )
+    solow_res = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(solow_csv.encode("utf-8")), "solow_custom.csv")},
+        content_type="multipart/form-data",
+        headers=AUTH_HEADERS,
+    )
+    assert solow_res.status_code == 200
+    solow = solow_res.get_json()
+    assert solow["domain"]["key"] == "generic"
+    assert solow["display_labels"]["col_90_ga_erishish_holati"] == "90% ga erishish holati"
+    assert solow["display_labels"]["kapital"] == "Kapital (K)"
+
+    c1 = solow["charts"].get("chart1", {})
+    c2 = solow["charts"].get("chart2", {})
+    assert c1 and c2
+    assert "Field Fill Rate" not in c1.get("title", "")
+    assert "col_90" not in c1.get("title", "").lower() and "col_90" not in c2.get("title", "").lower()
+    assert not c2.get("title", "").startswith("Davr by")
+    assert c1.get("type") == "line"
+    assert c2.get("type") == "doughnut"
+    assert c1.get("series_label") and c2.get("series_label")
+    assert all("col_" not in k["label"].lower() for k in solow["kpis"])
+    client.post(f"/api/purge/{solow['session_id']}", headers=AUTH_HEADERS)
+    print("[PASS] test_custom_generic_schema_and_sticky_header (Custom dataset BI pipeline, clean labels & persistent sticky header)")
 
 
 if __name__ == "__main__":

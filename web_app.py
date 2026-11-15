@@ -281,6 +281,91 @@ def generate_synthetic_demo_df(domain: str) -> pd.DataFrame:
         return pd.DataFrame(data)
 
 
+def _humanize_col(col: str, display_labels: Optional[dict] = None) -> str:
+    """Return original readable column header or strip col_/underscore boilerplate."""
+    col_str = str(col or "").strip()
+    if display_labels and col_str in display_labels and str(display_labels[col_str]).strip():
+        return str(display_labels[col_str]).strip()
+    cleaned = re.sub(r'^col_+', '', col_str)
+    cleaned = re.sub(r'_+', ' ', cleaned).strip()
+    if not cleaned:
+        return "Value"
+    acronyms = {"uzs", "usd", "fx", "kpi", "sku", "abc", "gdp", "roi", "gl", "id", "ctr", "cpc", "roas"}
+    words = []
+    for idx, tok in enumerate(cleaned.split()):
+        low = tok.lower()
+        if low in acronyms:
+            words.append(low.upper())
+        elif idx == 0:
+            words.append(tok[:1].upper() + tok[1:])
+        else:
+            words.append(tok)
+    return " ".join(words)
+
+
+def _format_metric_value(val: float) -> str:
+    """Format numeric KPI values cleanly without trailing noise."""
+    if pd.isna(val):
+        return "0"
+    if abs(val) >= 1000:
+        return f"{val:,.1f}" if abs(val % 1) >= 0.05 else f"{val:,.0f}"
+    if abs(val) >= 10:
+        return f"{val:,.2f}" if abs(val % 1) >= 0.005 else f"{val:,.0f}"
+    return f"{val:,.3f}".rstrip("0").rstrip(".") if "." in f"{val:,.3f}" else f"{val:,.0f}"
+
+
+def _pick_generic_columns(df: pd.DataFrame, num_cols: list[str], cat_cols: list[str]) -> tuple[Optional[str], list[str], Optional[str]]:
+    """Separate axis/sequence columns from real numeric metrics and choose best breakdown dimension."""
+    seq_pattern = re.compile(
+        r'^(id|no|num|idx|index|row|seq|step|davr|period|yil|year|quarter|month|day|t)$|_id$|^id_',
+        re.IGNORECASE,
+    )
+    axis_col: Optional[str] = None
+    metric_cols: list[str] = []
+
+    dt_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    if dt_cols:
+        axis_col = dt_cols[0]
+
+    for c in num_cols:
+        s = df[c].dropna()
+        is_seq = bool(seq_pattern.search(str(c)))
+        if not is_seq and len(s) >= 4:
+            try:
+                is_int_like = bool((s % 1 == 0).all())
+                diffs = s.diff().dropna()
+                if is_int_like and len(diffs) > 0 and (diffs > 0).all() and diffs.nunique() == 1 and diffs.iloc[0] in (1, 5, 10):
+                    is_seq = True
+            except Exception:
+                pass
+        if is_seq:
+            if axis_col is None:
+                axis_col = c
+        else:
+            metric_cols.append(c)
+
+    if not metric_cols and num_cols:
+        metric_cols = [c for c in num_cols if c != axis_col] or list(num_cols)
+
+    # Prefer metrics that are actual quantities/values before small ratios/growth rates
+    ratio_hint = re.compile(r'%|rate|ratio|growth|pct|share|sur|nisbat', re.IGNORECASE)
+    metric_cols.sort(key=lambda c: (1 if ratio_hint.search(str(c)) else 0))
+
+    # Pick most informative categorical dimension (low-to-medium cardinality: 2..12 distinct values)
+    usable_cats = [c for c in cat_cols if c not in dt_cols]
+    dim_col: Optional[str] = None
+    if usable_cats:
+        bounded = [(int(df[c].nunique(dropna=True)), c) for c in usable_cats if 2 <= df[c].nunique(dropna=True) <= 12]
+        if bounded:
+            bounded.sort(key=lambda x: x[0])
+            dim_col = bounded[0][1]
+        else:
+            varied = [c for c in usable_cats if df[c].nunique(dropna=True) >= 2]
+            dim_col = varied[0] if varied else usable_cats[0]
+
+    return axis_col, metric_cols, dim_col
+
+
 def build_analysis_payload(
     cleaner: SelfHealingCleaner,
     df: pd.DataFrame,
@@ -364,6 +449,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
 
     # 6. Compute Domain-Specific KPIs
     cols = list(df.columns)
+    display_labels = cleaner.audit_log.get("display_labels") or {}
     kpis = []
     charts = {}
 
@@ -514,19 +600,21 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
 
         if account_col and exp_col and pd.api.types.is_numeric_dtype(df[exp_col]):
             charts["chart1"] = {
-                "title": f"Expenses by {account_col.replace('_', ' ').title()}",
+                "title": f"Expenses by {_humanize_col(account_col, display_labels)}",
                 "type": "bar",
+                "series_label": _humanize_col(exp_col, display_labels),
                 "data": {str(k): round(float(v), 2) for k, v in df.groupby(account_col)[exp_col].sum().head(10).items()}
             }
         elif account_col and rev_col and pd.api.types.is_numeric_dtype(df[rev_col]):
             charts["chart1"] = {
-                "title": f"Revenue by {account_col.replace('_', ' ').title()}",
+                "title": f"Revenue by {_humanize_col(account_col, display_labels)}",
                 "type": "bar",
+                "series_label": _humanize_col(rev_col, display_labels),
                 "data": {str(k): round(float(v), 2) for k, v in df.groupby(account_col)[rev_col].sum().head(10).items()}
             }
         if account_col:
             charts["chart2"] = {
-                "title": f"Distribution by {account_col.replace('_', ' ').title()}",
+                "title": f"Distribution by {_humanize_col(account_col, display_labels)}",
                 "type": "doughnut",
                 "data": {str(k): int(v) for k, v in df[account_col].value_counts().head(8).items()}
             }
@@ -540,38 +628,137 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
 
         num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
         cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(df[c])]
+        axis_col, metric_cols, dim_col = _pick_generic_columns(df, num_cols, cat_cols)
 
-        first_cat = cat_cols[0] if cat_cols else (cols[0] if cols else "item")
-        unique_entities = int(df[first_cat].nunique()) if first_cat in cols else total_records
+        m1 = metric_cols[0] if metric_cols else None
+        m2 = metric_cols[1] if len(metric_cols) > 1 else None
+        m1_label = _humanize_col(m1, display_labels) if m1 else ""
+        m2_label = _humanize_col(m2, display_labels) if m2 else ""
+        axis_label = _humanize_col(axis_col, display_labels) if axis_col else ""
+        dim_label = _humanize_col(dim_col, display_labels) if dim_col else ""
 
         kpis = [
-            {"label": "Total Records", "value": f"{total_records:,}", "sub": "Recorded rows / observations", "theme": "emerald"},
-            {"label": "Data Fields / Dimensions", "value": f"{total_cols:,}", "sub": "Tracked attributes", "theme": "cyan"},
-            {"label": "Data Completeness", "value": f"{completeness:.1f}%", "sub": f"{filled_cells:,} non-empty data points", "theme": "emerald" if completeness >= 80 else "amber"},
-            {"label": "Primary Entities", "value": f"{unique_entities:,}", "sub": f"Unique {first_cat.replace('_', ' ').title()}", "theme": ""},
-            {"label": "Numeric Metrics", "value": f"{len(num_cols):,}", "sub": "Calculable numeric fields", "theme": "cyan"},
-            {"label": "Text / Categorical Fields", "value": f"{len(cat_cols):,}", "sub": "Descriptive dimensions", "theme": ""}
+            {"label": "Total Records", "value": f"{total_records:,}", "sub": f"{total_cols} attributes tracked", "theme": "emerald"},
         ]
 
-        col_fill_rates = {str(c): round(float(df[c].notna().mean() * 100), 1) for c in cols[:10]}
-        charts["chart1"] = {
-            "title": "Field Fill Rate (% Valid Data)",
-            "type": "bar",
-            "data": col_fill_rates
-        }
+        if m1:
+            m1_series = df[m1].dropna()
+            m1_sum = float(m1_series.sum()) if len(m1_series) else 0.0
+            m1_avg = float(m1_series.mean()) if len(m1_series) else 0.0
+            kpis.append({"label": f"Total {m1_label}", "value": _format_metric_value(m1_sum), "sub": f"Average: {_format_metric_value(m1_avg)}", "theme": "cyan"})
+        else:
+            kpis.append({"label": "Tracked Fields", "value": f"{total_cols:,}", "sub": f"{len(cat_cols)} text / category attributes", "theme": "cyan"})
 
-        if cat_cols and num_cols:
-            n_col = num_cols[0]
-            charts["chart2"] = {
-                "title": f"{n_col.replace('_', ' ').title()} by {first_cat.replace('_', ' ').title()}",
-                "type": "bar",
-                "data": {str(k): round(float(v), 2) for k, v in df.groupby(first_cat)[n_col].sum().head(8).items()}
+        if m2:
+            m2_series = df[m2].dropna()
+            m2_avg = float(m2_series.mean()) if len(m2_series) else 0.0
+            m2_max = float(m2_series.max()) if len(m2_series) else 0.0
+            kpis.append({"label": f"Average {m2_label}", "value": _format_metric_value(m2_avg), "sub": f"Peak: {_format_metric_value(m2_max)}", "theme": ""})
+        else:
+            kpis.append({"label": "Numeric Metrics", "value": f"{len(metric_cols):,}", "sub": "Quantitative measurements", "theme": ""})
+
+        if dim_col:
+            vc = df[dim_col].dropna().astype(str).value_counts()
+            unique_dim = int(vc.shape[0])
+            top_name = str(vc.index[0]) if len(vc) > 0 else "—"
+            top_pct = (int(vc.iloc[0]) / max(total_records, 1)) * 100.0 if len(vc) > 0 else 0.0
+            kpis.append({"label": dim_label, "value": f"{unique_dim:,}", "sub": f"Top: {top_name} ({top_pct:.0f}%)", "theme": "amber"})
+        elif axis_col:
+            ax_series = df[axis_col].dropna()
+            span_sub = f"{ax_series.min()} – {ax_series.max()}" if len(ax_series) else "Sequence"
+            kpis.append({"label": axis_label, "value": f"{int(ax_series.nunique()):,}", "sub": span_sub, "theme": "amber"})
+
+        kpis.append({
+            "label": "Data Completeness",
+            "value": f"{completeness:.1f}%",
+            "sub": f"{filled_cells:,} populated values",
+            "theme": "emerald" if completeness >= 80 else "amber"
+        })
+
+        # Chart 1: Prefer real metric dynamics over time/sequence or breakdown by category
+        if m1 and axis_col and len(df) >= 2:
+            trend_df = df[[axis_col, m1]].dropna().copy()
+            if len(trend_df) > 36:
+                step = max(len(trend_df) // 36, 1)
+                trend_df = trend_df.iloc[::step].head(36)
+            if pd.api.types.is_datetime64_any_dtype(trend_df[axis_col]):
+                ax_keys = trend_df[axis_col].dt.strftime("%Y-%m-%d").tolist()
+            else:
+                ax_keys = [
+                    str(int(v)) if isinstance(v, (int, float)) and float(v).is_integer() else str(v)
+                    for v in trend_df[axis_col].tolist()
+                ]
+            charts["chart1"] = {
+                "title": f"{m1_label} ({axis_label})",
+                "type": "line",
+                "series_label": m1_label,
+                "data": {k: round(float(v), 2) for k, v in zip(ax_keys, trend_df[m1].tolist())}
             }
-        elif cat_cols:
+        elif m1 and dim_col and df[dim_col].nunique(dropna=True) >= 2:
+            grouped = df.groupby(dim_col)[m1].sum().head(10)
+            charts["chart1"] = {
+                "title": f"{m1_label} by {dim_label}",
+                "type": "bar",
+                "series_label": m1_label,
+                "data": {str(k): round(float(v), 2) for k, v in grouped.items()}
+            }
+        elif len(metric_cols) >= 2:
+            charts["chart1"] = {
+                "title": "Average Value by Metric",
+                "type": "bar",
+                "series_label": "Average",
+                "data": {_humanize_col(c, display_labels): round(float(df[c].mean()), 2) for c in metric_cols[:8] if df[c].notna().any()}
+            }
+        elif dim_col and df[dim_col].nunique(dropna=True) >= 2:
+            vc = df[dim_col].dropna().astype(str).value_counts().head(8)
+            charts["chart1"] = {
+                "title": f"Distribution: {dim_label}",
+                "type": "bar",
+                "series_label": "Records",
+                "data": {str(k): int(v) for k, v in vc.items()}
+            }
+        else:
+            col_fill_rates = {_humanize_col(c, display_labels): round(float(df[c].notna().mean() * 100), 1) for c in cols[:10]}
+            charts["chart1"] = {
+                "title": "Data Completeness by Field (%)",
+                "type": "bar",
+                "series_label": "Completeness %",
+                "data": col_fill_rates
+            }
+
+        # Chart 2: Category share / comparison on real dimensions & metrics (never sum sequential ID/period)
+        if dim_col and df[dim_col].nunique(dropna=True) >= 2:
+            vc = df[dim_col].dropna().astype(str).value_counts().head(8)
             charts["chart2"] = {
-                "title": f"Observations by {first_cat.replace('_', ' ').title()}",
+                "title": f"Breakdown: {dim_label}",
                 "type": "doughnut",
-                "data": {str(k): int(v) for k, v in df[first_cat].value_counts().head(8).items()}
+                "series_label": "Records",
+                "data": {str(k): int(v) for k, v in vc.items()}
+            }
+        elif m2 and axis_col and len(df) >= 2:
+            trend_df2 = df[[axis_col, m2]].dropna().copy()
+            if len(trend_df2) > 36:
+                step2 = max(len(trend_df2) // 36, 1)
+                trend_df2 = trend_df2.iloc[::step2].head(36)
+            if pd.api.types.is_datetime64_any_dtype(trend_df2[axis_col]):
+                ax_keys2 = trend_df2[axis_col].dt.strftime("%Y-%m-%d").tolist()
+            else:
+                ax_keys2 = [
+                    str(int(v)) if isinstance(v, (int, float)) and float(v).is_integer() else str(v)
+                    for v in trend_df2[axis_col].tolist()
+                ]
+            charts["chart2"] = {
+                "title": f"{m2_label} ({axis_label})",
+                "type": "line",
+                "series_label": m2_label,
+                "data": {k: round(float(v), 2) for k, v in zip(ax_keys2, trend_df2[m2].tolist())}
+            }
+        elif len(metric_cols) >= 2:
+            charts["chart2"] = {
+                "title": "Total Volume by Metric",
+                "type": "bar",
+                "series_label": "Total",
+                "data": {_humanize_col(c, display_labels): round(float(df[c].sum()), 2) for c in metric_cols[:8] if df[c].notna().any()}
             }
 
     else:
@@ -628,7 +815,8 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
         anomalies=anomalies_list,
         anomaly_summary=anomaly_summary_dict,
         fx_info=fx_dict,
-        pareto_info=pareto_dict
+        pareto_info=pareto_dict,
+        display_labels=display_labels
     )
 
     # 9. Generate Native Power BI Project (.pbip) artifacts
@@ -691,6 +879,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
             "available_sheets": getattr(cleaner, "available_sheets", []),
         },
         "table_columns": list(df.columns),
+        "display_labels": display_labels,
         "table_records": records,
     }
     return sanitize_for_json(payload)
