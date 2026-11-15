@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import functools
 import pandas as pd
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, make_response
+from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, make_response, redirect, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from cleaner import SelfHealingCleaner
@@ -27,7 +27,16 @@ from session_store import sessions
 from dashboard_preview import generate_html_dashboard
 from pbip_generator import generate_pbip_artifacts
 from google_sheets import fetch_google_sheets_csv, extract_google_sheets_csv_url
-from i18n_translations import LEGAL_DOCUMENTS, LEGAL_UI, SUPPORTED_LANGS, normalize_lang, resolve_lang
+from i18n_translations import (
+    LEGAL_DOCUMENTS,
+    LEGAL_UI,
+    SUPPORTED_LANGS,
+    SUPPORTED_THEMES,
+    normalize_lang,
+    normalize_theme,
+    resolve_lang,
+    resolve_theme,
+)
 
 import numpy as np
 import math
@@ -668,13 +677,8 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
     return sanitize_for_json(payload)
 
 
-def _render_legal_page(doc_key: str):
-    """Render a localized legal document (/privacy or /terms) and persist ?lang= preference."""
-    lang = resolve_lang(request)
-    doc = LEGAL_DOCUMENTS[doc_key].get(lang, LEGAL_DOCUMENTS[doc_key]["en"])
-    ui = LEGAL_UI.get(lang, LEGAL_UI["en"])
-    html_out = render_template("legal.html", lang=lang, supported_langs=SUPPORTED_LANGS, legal_ui=ui, **doc)
-    res = make_response(html_out)
+def _apply_ui_pref_cookies(res):
+    """Persist explicit ?lang= and ?theme= query parameters in cookies."""
     explicit_lang = normalize_lang(request.args.get("lang", ""))
     if explicit_lang in SUPPORTED_LANGS:
         res.set_cookie(
@@ -684,23 +688,53 @@ def _render_legal_page(doc_key: str):
             samesite="Lax",
             secure=_is_https_request(),
         )
+    explicit_theme = normalize_theme(request.args.get("theme", ""))
+    if explicit_theme in SUPPORTED_THEMES:
+        res.set_cookie(
+            "autobi_theme",
+            explicit_theme,
+            max_age=365 * 86400,
+            samesite="Lax",
+            secure=_is_https_request(),
+        )
     return res
+
+
+def _render_legal_page(doc_key: str):
+    """Render a localized legal document (/privacy or /terms) and persist preferences."""
+    lang = resolve_lang(request)
+    theme = resolve_theme(request)
+    doc = LEGAL_DOCUMENTS[doc_key].get(lang, LEGAL_DOCUMENTS[doc_key]["en"])
+    ui = LEGAL_UI.get(lang, LEGAL_UI["en"])
+    html_out = render_template(
+        "legal.html",
+        lang=lang,
+        theme=theme,
+        supported_langs=SUPPORTED_LANGS,
+        legal_ui=ui,
+        **doc,
+    )
+    return _apply_ui_pref_cookies(make_response(html_out))
 
 
 @app.route("/")
 def index():
+    """Render the animated 3D Data Analytics & Engineering landing page."""
+    if request.args.get("demo"):
+        return redirect(url_for("studio", **request.args.to_dict()))
     lang = resolve_lang(request)
-    res = make_response(render_template("index.html", lang=lang))
-    explicit_lang = normalize_lang(request.args.get("lang", ""))
-    if explicit_lang in SUPPORTED_LANGS:
-        res.set_cookie(
-            "autobi_lang",
-            explicit_lang,
-            max_age=365 * 86400,
-            samesite="Lax",
-            secure=_is_https_request(),
-        )
-    return res
+    theme = resolve_theme(request)
+    res = make_response(render_template("landing.html", lang=lang, theme=theme))
+    return _apply_ui_pref_cookies(res)
+
+
+@app.route("/studio")
+def studio():
+    """Render the interactive AutoBI Studio workspace."""
+    lang = resolve_lang(request)
+    theme = resolve_theme(request)
+    res = make_response(render_template("index.html", lang=lang, theme=theme))
+    return _apply_ui_pref_cookies(res)
 
 
 @app.route("/privacy")

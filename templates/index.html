@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="{{ lang or 'en' }}">
+<html lang="{{ lang or 'en' }}" data-theme="{{ theme or 'dark' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoBI — Multi-Domain Self-Healing Spreadsheet to Power BI Engine</title>
     <meta name="description" content="Automate messy spreadsheet cleaning, domain classification, and instant Power BI semantic model & DAX measure generation across Sales, Marketing, HR, Inventory, and Finance.">
-    <meta name="theme-color" content="#090d16">
+    <meta name="theme-color" content="{{ '#f4f7fc' if theme == 'light' else '#090d16' }}">
     <link rel="icon" href="/favicon.ico" sizes="48x48">
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32x32.png') }}">
@@ -17,20 +17,26 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="app-container">
         <!-- App Header -->
         <header class="app-header">
-            <div class="brand-group">
+            <a href="{{ url_for('index') }}" class="brand-group legal-brand-link">
                 <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img" width="44" height="44">
                 <div class="brand-meta">
                     <h1>AutoBI Studio</h1>
                     <p data-i18n="brand_tagline">Multi-Domain Self-Healing Spreadsheet to Power BI Engine</p>
                 </div>
-            </div>
+            </a>
             <div class="header-badges">
+                <a href="{{ url_for('index') }}" class="nav-anchor-link" data-i18n="nav_overview">← Overview</a>
+                <button type="button" id="themeToggleBtn" class="theme-toggle-btn" aria-label="Switch theme">
+                    <span class="theme-toggle-icon"></span>
+                    <span class="theme-toggle-label">Light</span>
+                </button>
                 <div class="lang-switcher" role="group" aria-label="Language selector">
                     <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
                     <button type="button" class="lang-btn" data-lang="ru" aria-pressed="false">RU</button>
@@ -98,16 +104,16 @@
             </div>
 
             <!-- Google Sheets URL Form (Hidden by default) -->
-            <div id="gsheetsSection" style="display: none; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 32px 24px; text-align: center;">
+            <div id="gsheetsSection" class="gsheets-panel" style="display: none;">
                 <div style="font-size: 32px; margin-bottom: 12px;">🌐</div>
-                <h3 style="font-family: var(--font-heading); font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 6px;" data-i18n="gsheets_title">
+                <h3 data-i18n="gsheets_title">
                     Connect Live Google Sheet
                 </h3>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px; max-width: 540px; margin-left: auto; margin-right: auto;" data-i18n="gsheets_sub">
                     Paste your public Google Sheets link. AutoBI cleans it and creates a Power BI model configured with live 1-click cloud refresh.
                 </p>
                 <form id="gsheetsForm" style="display: flex; gap: 10px; max-width: 640px; margin: 0 auto; flex-wrap: wrap;">
-                    <input type="url" id="gsheetsUrlInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" data-i18n-placeholder="gsheets_placeholder" required style="flex: 1; min-width: 280px; background: rgba(10, 15, 30, 0.8); border: 1px solid var(--border-active); border-radius: var(--radius-sm); padding: 12px 16px; color: #fff; font-size: 14px; outline: none;">
+                    <input type="url" id="gsheetsUrlInput" class="gsheets-input" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" data-i18n-placeholder="gsheets_placeholder" required>
                     <button type="submit" id="gsheetsSubmitBtn" class="btn btn-primary" style="padding: 12px 24px;" data-i18n="gsheets_submit">
                         ⚡ Ingest & Model
                     </button>
@@ -147,7 +153,7 @@
         <!-- Loading State Card -->
         <div id="loadingCard" class="loading-card">
             <div class="spinner"></div>
-            <h3 style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: #fff;" data-i18n="loading_title">
+            <h3 style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: var(--text-primary);" data-i18n="loading_title">
                 Analyzing, Classifying & Healing Dataset...
             </h3>
             <p id="loadingFileName" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;" data-i18n="loading_sub">
@@ -165,12 +171,12 @@
         <!-- Results Workspace -->
         <main id="resultsContainer" class="results-container">
             <!-- Purge Notification Banner -->
-            <div id="purgeBanner" class="alert-banner" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: var(--radius-md); padding: 14px 20px; margin-bottom: 24px; color: #6ee7b7; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+            <div id="purgeBanner" class="purge-alert-banner">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span>🔒</span>
                     <span id="purgeBannerText">Session and all uploaded data permanently purged from server memory and disk storage.</span>
                 </div>
-                <button type="button" onclick="document.getElementById('purgeBanner').style.display='none'" style="background: none; border: none; color: #6ee7b7; cursor: pointer; font-size: 18px; line-height: 1;">&times;</button>
+                <button type="button" onclick="document.getElementById('purgeBanner').style.display='none'" style="background: none; border: none; color: inherit; cursor: pointer; font-size: 18px; line-height: 1;">&times;</button>
             </div>
 
             <!-- Action Banner -->
@@ -181,7 +187,7 @@
                         <span id="domainBadge" class="domain-pill">🛍️ Sales & E-Commerce (96% match)</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13px;">
-                        <span><span data-i18n="label_source">Source:</span> <strong id="activeFileBadge" style="color: #a5b4fc;">sample.xlsx</strong></span>
+                        <span><span data-i18n="label_source">Source:</span> <strong id="activeFileBadge" style="color: var(--accent-indigo);">sample.xlsx</strong></span>
                         <div id="sheetPickerWrap" style="display: none; align-items: center; gap: 6px;">
                             <label for="sheetSelect" style="color: var(--text-muted);" data-i18n="label_sheet_tab">Sheet Tab:</label>
                             <select id="sheetSelect" class="domain-select" style="min-width: 130px;"></select>
@@ -226,7 +232,7 @@
             <!-- Tab 1: Executive Dashboard -->
             <section id="tabDashboard" class="tab-panel active">
                 <!-- Executive Anomaly Alert Banner -->
-                <div id="dashboardAlertBanner" style="display: none; margin-bottom: 20px; padding: 12px 16px; border-radius: 10px; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); color: #fecdd3; font-size: 13px; align-items: center; justify-content: space-between;"></div>
+                <div id="dashboardAlertBanner" class="dashboard-anomaly-banner"></div>
 
                 <!-- Dynamic KPI Grid -->
                 <div id="kpiGrid" class="kpi-grid">

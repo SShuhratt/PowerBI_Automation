@@ -6,6 +6,7 @@ for AutoBI Studio legal pages, language resolution, and localized responses.
 from typing import Any, Dict
 
 SUPPORTED_LANGS = ("en", "ru", "uz")
+SUPPORTED_THEMES = ("dark", "light")
 
 
 def normalize_lang(raw: str) -> str:
@@ -18,6 +19,25 @@ def normalize_lang(raw: str) -> str:
     if code.startswith("en"):
         return "en"
     return ""
+
+
+def normalize_theme(raw: str) -> str:
+    """Normalize theme name to 'dark' or 'light' (empty string if invalid)."""
+    val = (raw or "").strip().lower()
+    if val in SUPPORTED_THEMES:
+        return val
+    return ""
+
+
+def resolve_theme(req) -> str:
+    """Resolve UI theme from ?theme= param or autobi_theme cookie (defaulting to 'dark')."""
+    query_theme = normalize_theme(req.args.get("theme", ""))
+    if query_theme:
+        return query_theme
+    cookie_theme = normalize_theme(req.cookies.get("autobi_theme", ""))
+    if cookie_theme:
+        return cookie_theme
+    return "dark"
 
 
 def resolve_lang(req) -> str:
@@ -42,6 +62,7 @@ def resolve_lang(req) -> str:
 LEGAL_UI: Dict[str, Dict[str, str]] = {
     "en": {
         "brand_tagline": "Multi-Domain Self-Healing Spreadsheet to Power BI Engine",
+        "back_to_overview": "Overview",
         "back_to_studio": "← Back to Studio",
         "effective_label": "Effective Date",
         "privacy_tab": "Privacy Policy",
@@ -50,9 +71,11 @@ LEGAL_UI: Dict[str, Dict[str, str]] = {
         "questions_body": "Contact the AutoBI Studio team directly at",
         "open_studio": "Open AutoBI Studio",
         "footer_tagline": "AutoBI Studio · Automated Power BI & Executive Analytics",
+        "theme_label": "Theme",
     },
     "ru": {
         "brand_tagline": "Мультидоменный движок очистки таблиц и генерации моделей Power BI",
+        "back_to_overview": "Обзор",
         "back_to_studio": "← Назад в студию",
         "effective_label": "Дата вступления в силу",
         "privacy_tab": "Политика конфиденциальности",
@@ -61,9 +84,11 @@ LEGAL_UI: Dict[str, Dict[str, str]] = {
         "questions_body": "Свяжитесь с командой AutoBI Studio по адресу",
         "open_studio": "Открыть AutoBI Studio",
         "footer_tagline": "AutoBI Studio · Автоматизация Power BI и управленческой аналитики",
+        "theme_label": "Тема",
     },
     "uz": {
         "brand_tagline": "Jadvallarni avtomatik tozalash va Power BI modellarini yaratish tizimi",
+        "back_to_overview": "Bosh sahifa",
         "back_to_studio": "← Studiyaga qaytish",
         "effective_label": "Kuchga kirish sanasi",
         "privacy_tab": "Maxfiylik siyosati",
@@ -72,6 +97,7 @@ LEGAL_UI: Dict[str, Dict[str, str]] = {
         "questions_body": "AutoBI Studio jamoasi bilan bevosita bog‘laning:",
         "open_studio": "AutoBI Studio’ni ochish",
         "footer_tagline": "AutoBI Studio · Avtomatlashtirilgan Power BI va boshqaruv tahlili",
+        "theme_label": "Mavzu",
     },
 }
 

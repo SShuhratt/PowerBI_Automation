@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="{{ lang or 'en' }}">
+<html lang="{{ lang or 'en' }}" data-theme="{{ theme or 'dark' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ page_title }} — AutoBI Studio</title>
     <meta name="description" content="{{ meta_description }}">
-    <meta name="theme-color" content="#090d16">
+    <meta name="theme-color" content="{{ '#f4f7fc' if theme == 'light' else '#090d16' }}">
     <link rel="icon" href="/favicon.ico" sizes="48x48">
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32x32.png') }}">
@@ -15,6 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -28,12 +29,16 @@
                 </div>
             </a>
             <div class="header-badges">
+                <button type="button" id="themeToggleBtn" class="theme-toggle-btn" aria-label="{{ legal_ui.theme_label }}">
+                    <span class="theme-toggle-icon"></span>
+                    <span class="theme-toggle-label">{{ 'Dark' if theme == 'light' else 'Light' }}</span>
+                </button>
                 <div class="lang-switcher" role="group" aria-label="Language selector">
                     {% for code in supported_langs %}
                     <a href="{{ url_for('privacy_policy' if doc_type == 'privacy' else 'terms_of_service', lang=code) }}" class="lang-btn {% if lang == code %}active{% endif %}" data-lang="{{ code }}">{{ code.upper() }}</a>
                     {% endfor %}
                 </div>
-                <a href="{{ url_for('index', lang=lang) }}" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px; text-decoration: none;">
+                <a href="{{ url_for('studio', lang=lang) }}" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px; text-decoration: none;">
                     {{ legal_ui.back_to_studio }}
                 </a>
             </div>
@@ -73,7 +78,7 @@
                     <strong>{{ legal_ui.questions_heading }}</strong>
                     <span>{{ legal_ui.questions_body }} <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>.</span>
                 </div>
-                <a href="{{ url_for('index', lang=lang) }}" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; text-decoration: none;">{{ legal_ui.open_studio }}</a>
+                <a href="{{ url_for('studio', lang=lang) }}" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; text-decoration: none;">{{ legal_ui.open_studio }}</a>
             </div>
         </article>
 

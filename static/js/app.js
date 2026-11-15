@@ -205,8 +205,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Call on load
-    checkAuthStatus();
+    // Call on load (and optionally launch ?demo=<domain> clicked from the 3D landing page)
+    checkAuthStatus().then(() => {
+        const params = new URLSearchParams(window.location.search);
+        const demoDomain = (params.get('demo') || '').trim().toLowerCase();
+        if (['sales', 'marketing', 'hr', 'inventory', 'finance'].includes(demoDomain)) {
+            if (window.history && window.history.replaceState) {
+                params.delete('demo');
+                const cleanSearch = params.toString();
+                window.history.replaceState({}, '', window.location.pathname + (cleanSearch ? '?' + cleanSearch : ''));
+            }
+            requireWorkspaceAuth(() => handleSampleRun(demoDomain));
+        }
+    });
+
+    if (window.autobiTheme && typeof window.autobiTheme.onChange === 'function') {
+        window.autobiTheme.onChange(() => {
+            if (lastRenderedData && lastRenderedData.charts) {
+                renderCharts(lastRenderedData.charts);
+            }
+        });
+    }
 
     // --- Telegram Executive Digest Dispatcher ---
     let tgConnectCode = null;
@@ -848,6 +867,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const colors = [
             '#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'
         ];
+        const isLightTheme = (window.autobiTheme && window.autobiTheme.getTheme() === 'light')
+            || document.documentElement.getAttribute('data-theme') === 'light';
+        const chartLegendColor = isLightTheme ? '#334155' : '#cbd5e1';
+        const chartTickColor = isLightTheme ? '#64748b' : '#94a3b8';
+        const chartGridColor = isLightTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+        const chartSurfaceBorder = isLightTheme ? '#ffffff' : '#090d16';
 
         // Chart 1
         const c1Config = charts.chart1;
@@ -868,7 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         label: 'Value',
                         data: values,
                         backgroundColor: c1Config.type === 'doughnut' ? colors : 'rgba(99, 102, 241, 0.85)',
-                        borderColor: c1Config.type === 'doughnut' ? '#090d16' : '#6366f1',
+                        borderColor: c1Config.type === 'doughnut' ? chartSurfaceBorder : '#6366f1',
                         borderWidth: 1,
                         borderRadius: 6
                     }]
@@ -877,11 +902,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: c1Config.type === 'doughnut', labels: { color: '#cbd5e1' } }
+                        legend: { display: c1Config.type === 'doughnut', labels: { color: chartLegendColor } }
                     },
                     scales: c1Config.type === 'doughnut' ? {} : {
-                        y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
-                        x: { grid: { display: false }, ticks: { color: '#cbd5e1' } }
+                        y: { beginAtZero: true, grid: { color: chartGridColor }, ticks: { color: chartTickColor } },
+                        x: { grid: { display: false }, ticks: { color: chartLegendColor } }
                     }
                 }
             });
@@ -905,7 +930,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     datasets: [{
                         data: values,
                         backgroundColor: colors,
-                        borderColor: '#090d16',
+                        borderColor: chartSurfaceBorder,
                         borderWidth: 2
                     }]
                 },
@@ -913,7 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'bottom', labels: { color: '#cbd5e1', padding: 12 } }
+                        legend: { position: 'bottom', labels: { color: chartLegendColor, padding: 12 } }
                     },
                     cutout: c2Config.type === 'doughnut' ? '65%' : 0
                 }
@@ -939,12 +964,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div style="display: flex; align-items: center; justify-content: space-between;">
                             <h3>${escapeHtml(t('audit_flags_title', { count: anomalies.length }))}</h3>
                             <div style="display: flex; gap: 6px;">
-                                ${anomalySummary.critical_count > 0 ? `<span class="audit-item-badge" style="background: rgba(244,63,94,0.25); color: #fda4af;">${escapeHtml(t('audit_critical', { n: anomalySummary.critical_count }))}</span>` : ''}
-                                ${anomalySummary.warning_count > 0 ? `<span class="audit-item-badge" style="background: rgba(245,158,11,0.25); color: #fde68a;">${escapeHtml(t('audit_warning', { n: anomalySummary.warning_count }))}</span>` : ''}
-                                ${anomalySummary.info_count > 0 ? `<span class="audit-item-badge" style="background: rgba(56,189,248,0.25); color: #bae6fd;">${escapeHtml(t('audit_notice', { n: anomalySummary.info_count }))}</span>` : ''}
+                                ${anomalySummary.critical_count > 0 ? `<span class="audit-item-badge" style="background: rgba(244,63,94,0.16); color: var(--accent-rose); border-color: rgba(244,63,94,0.35);">${escapeHtml(t('audit_critical', { n: anomalySummary.critical_count }))}</span>` : ''}
+                                ${anomalySummary.warning_count > 0 ? `<span class="audit-item-badge" style="background: rgba(245,158,11,0.16); color: var(--accent-amber); border-color: rgba(245,158,11,0.35);">${escapeHtml(t('audit_warning', { n: anomalySummary.warning_count }))}</span>` : ''}
+                                ${anomalySummary.info_count > 0 ? `<span class="audit-item-badge" style="background: rgba(6,182,212,0.16); color: var(--accent-cyan); border-color: rgba(6,182,212,0.35);">${escapeHtml(t('audit_notice', { n: anomalySummary.info_count }))}</span>` : ''}
                             </div>
                         </div>
-                        <p class="text-xs text-slate-400">${escapeHtml(t('audit_flags_desc'))}</p>
+                        <p class="text-xs" style="color: var(--text-muted);">${escapeHtml(t('audit_flags_desc'))}</p>
                     </div>
                 </div>
             `;
@@ -955,17 +980,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.style.alignItems = 'flex-start';
                 el.style.gap = '6px';
 
-                const badgeBg = item.severity === 'critical' ? 'rgba(244,63,94,0.2)' : (item.severity === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(56,189,248,0.2)');
-                const badgeColor = item.severity === 'critical' ? '#fda4af' : (item.severity === 'warning' ? '#fde68a' : '#bae6fd');
+                const badgeBg = item.severity === 'critical' ? 'rgba(244,63,94,0.16)' : (item.severity === 'warning' ? 'rgba(245,158,11,0.16)' : 'rgba(6,182,212,0.16)');
+                const badgeColor = item.severity === 'critical' ? 'var(--accent-rose)' : (item.severity === 'warning' ? 'var(--accent-amber)' : 'var(--accent-cyan)');
 
                 let sampleStr = '';
                 if (item.sample_rows && item.sample_rows.length > 0) {
-                    sampleStr = `<div style="font-size: 11px; font-family: monospace; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; width: 100%; overflow-x: auto;">${escapeHtml(t('audit_sample_prefix'))} ${escapeHtml(JSON.stringify(item.sample_rows[0]))}</div>`;
+                    sampleStr = `<div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); background: var(--bg-code); border: 1px solid var(--border-subtle); padding: 4px 8px; border-radius: 4px; width: 100%; overflow-x: auto;">${escapeHtml(t('audit_sample_prefix'))} ${escapeHtml(JSON.stringify(item.sample_rows[0]))}</div>`;
                 }
 
                 el.innerHTML = `
                     <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
-                        <span style="font-weight: 600; color: #e2e8f0;">[${escapeHtml(item.severity.toUpperCase())}] ${escapeHtml(item.title)}</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">[${escapeHtml(item.severity.toUpperCase())}] ${escapeHtml(item.title)}</span>
                         <span class="audit-item-badge" style="background: ${badgeBg}; color: ${badgeColor};">${escapeHtml(t('audit_affected', { n: item.affected_count }))}</span>
                     </div>
                     <span style="font-size: 12px; color: var(--text-muted);">${escapeHtml(item.description)}</span>

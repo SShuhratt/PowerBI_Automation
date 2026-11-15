@@ -52,9 +52,13 @@ def test_index_route():
     res = client.get("/")
     assert res.status_code == 200
     assert b"AutoBI Studio" in res.data
-    assert b"dropzone" in res.data
-    assert b"Zero-Persistence Guarantee" in res.data
-    assert b"Download Power BI Starter Kit" in res.data
+    assert b"hero3dCanvas" in res.data
+    assert b"schema3dCanvas" in res.data
+    assert b"domain3dCanvas" in res.data
+    assert b"landing3d.js" in res.data
+    assert b"theme.js" in res.data
+    assert b"themeToggleBtn" in res.data
+    assert b"/studio" in res.data
     assert b"/privacy" in res.data
     assert b"/terms" in res.data
     assert b"support@autobi.uz" in res.data
@@ -62,7 +66,27 @@ def test_index_route():
     assert b"favicon.svg" in res.data
     assert b"i18n.js" in res.data
     assert b"lang-switcher" in res.data
-    print("[PASS] test_index_route")
+    assert b'data-theme="dark"' in res.data
+
+    # Light theme persistence via ?theme=light -> autobi_theme cookie -> /studio
+    res_light = client.get("/?theme=light")
+    assert res_light.status_code == 200
+    assert b'data-theme="light"' in res_light.data
+
+    # Studio workspace route inherits persisted theme and renders upload dropzone
+    studio_res = client.get("/studio")
+    assert studio_res.status_code == 200
+    assert b'data-theme="light"' in studio_res.data
+    assert b"dropzone" in studio_res.data
+    assert b"Zero-Persistence Guarantee" in studio_res.data
+    assert b"Download Power BI Starter Kit" in studio_res.data
+    assert b"themeToggleBtn" in studio_res.data
+
+    # Legacy demo query on / redirects cleanly to /studio?demo=sales
+    redir_res = client.get("/?demo=sales")
+    assert redir_res.status_code == 302
+    assert "/studio?demo=sales" in (redir_res.headers.get("Location") or "")
+    print("[PASS] test_index_route (3D landing on /, /studio workspace & dual dark/light theme)")
 
 
 def test_brand_assets():
@@ -76,11 +100,13 @@ def test_brand_assets():
         ("/static/img/favicon-32x32.png", "image/png"),
         ("/static/site.webmanifest", "application/"),
         ("/static/js/i18n.js", "javascript"),
+        ("/static/js/theme.js", "javascript"),
+        ("/static/js/landing3d.js", "javascript"),
     ]:
         res = client.get(path)
         assert res.status_code == 200, f"Expected 200 on {path}, got {res.status_code}"
         assert expected_mime in (res.content_type or ""), f"Unexpected mime for {path}: {res.content_type}"
-    print("[PASS] test_brand_assets (SVG logo, icons, favicon, manifest & i18n.js)")
+    print("[PASS] test_brand_assets (SVG logo, icons, favicon, manifest, theme.js, i18n.js & landing3d.js)")
 
 
 def test_legal_pages():
