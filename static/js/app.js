@@ -48,8 +48,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeAuthModalBtn = document.getElementById('closeAuthModalBtn');
     const openAuthBtn = document.getElementById('openAuthBtn');
     const authForm = document.getElementById('authForm');
+    const authTabLogin = document.getElementById('authTabLogin');
+    const authTabRegister = document.getElementById('authTabRegister');
+    const authFullNameGroup = document.getElementById('authFullNameGroup');
+    const authFullNameInput = document.getElementById('authFullNameInput');
     const authEmailInput = document.getElementById('authEmailInput');
     const authPasscodeInput = document.getElementById('authPasscodeInput');
+    const authConfirmGroup = document.getElementById('authConfirmGroup');
+    const authConfirmInput = document.getElementById('authConfirmInput');
+    const authSubmitBtn = document.getElementById('authSubmitBtn');
+    const authSwitchPrompt = document.getElementById('authSwitchPrompt');
+    const authSwitchLinkBtn = document.getElementById('authSwitchLinkBtn');
     const authErrorMsg = document.getElementById('authErrorMsg');
     const userStatusBadge = document.getElementById('userStatusBadge');
     const userEmailSpan = document.getElementById('userEmailSpan');
@@ -78,15 +87,66 @@ document.addEventListener('DOMContentLoaded', () => {
     let authEnabled = true;
     let isAuthenticated = false;
     let pendingAuthAction = null;
+    let authMode = 'login'; // 'login' | 'register'
 
-    function openAuthModal(actionAfterLogin = null) {
-        pendingAuthAction = actionAfterLogin;
+    function showAuthError(msg) {
+        if (!authErrorMsg) return;
+        authErrorMsg.textContent = msg;
+        authErrorMsg.style.display = 'block';
+    }
+
+    function setAuthMode(mode) {
+        authMode = mode === 'register' ? 'register' : 'login';
+        const isReg = authMode === 'register';
         if (authErrorMsg) authErrorMsg.style.display = 'none';
-        if (authGateModal) authGateModal.style.display = 'flex';
-        if (authPasscodeInput) {
-            authPasscodeInput.value = '';
-            setTimeout(() => authPasscodeInput.focus(), 50);
+        if (authTabLogin) {
+            authTabLogin.classList.toggle('active', !isReg);
+            authTabLogin.setAttribute('aria-selected', String(!isReg));
         }
+        if (authTabRegister) {
+            authTabRegister.classList.toggle('active', isReg);
+            authTabRegister.setAttribute('aria-selected', String(isReg));
+        }
+        if (authFullNameGroup) authFullNameGroup.style.display = isReg ? 'flex' : 'none';
+        if (authConfirmGroup) authConfirmGroup.style.display = isReg ? 'flex' : 'none';
+        if (authPasscodeInput) {
+            authPasscodeInput.setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
+        }
+        if (authSubmitBtn) {
+            authSubmitBtn.textContent = isReg ? t('auth_register_submit_btn') : t('auth_submit_btn');
+        }
+        if (authSwitchPrompt) {
+            authSwitchPrompt.textContent = isReg ? t('auth_switch_has_account') : t('auth_switch_no_account');
+        }
+        if (authSwitchLinkBtn) {
+            authSwitchLinkBtn.textContent = isReg ? t('auth_switch_signin') : t('auth_switch_create');
+        }
+    }
+
+    function openAuthModal(actionAfterLogin = null, mode = 'login') {
+        pendingAuthAction = actionAfterLogin;
+        setAuthMode(mode);
+        if (authErrorMsg) authErrorMsg.style.display = 'none';
+        // Never prefill credentials
+        if (authFullNameInput) authFullNameInput.value = '';
+        if (authEmailInput) authEmailInput.value = '';
+        if (authPasscodeInput) authPasscodeInput.value = '';
+        if (authConfirmInput) authConfirmInput.value = '';
+        if (authGateModal) authGateModal.style.display = 'flex';
+        if (authEmailInput) {
+            setTimeout(() => authEmailInput.focus(), 50);
+        }
+    }
+
+    if (authTabLogin) authTabLogin.addEventListener('click', () => setAuthMode('login'));
+    if (authTabRegister) authTabRegister.addEventListener('click', () => setAuthMode('register'));
+    if (authSwitchLinkBtn) {
+        authSwitchLinkBtn.addEventListener('click', () => {
+            setAuthMode(authMode === 'login' ? 'register' : 'login');
+        });
+    }
+    if (i18n && typeof i18n.onChange === 'function') {
+        i18n.onChange(() => setAuthMode(authMode));
     }
 
     function closeAuthModal() {
@@ -159,14 +219,50 @@ document.addEventListener('DOMContentLoaded', () => {
         authForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (authErrorMsg) authErrorMsg.style.display = 'none';
+            const fullName = authFullNameInput ? authFullNameInput.value.trim() : '';
             const email = authEmailInput ? authEmailInput.value.trim() : '';
-            const passcode = authPasscodeInput ? authPasscodeInput.value.trim() : '';
+            const password = authPasscodeInput ? authPasscodeInput.value.trim() : '';
+            const confirmPassword = authConfirmInput ? authConfirmInput.value.trim() : '';
+
+            // Localized client-side validation (avoids browser OS-language tooltips)
+            if (!email) {
+                showAuthError(t('err_email_required'));
+                if (authEmailInput) authEmailInput.focus();
+                return;
+            }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                showAuthError(t('err_email_invalid'));
+                if (authEmailInput) authEmailInput.focus();
+                return;
+            }
+            if (!password) {
+                showAuthError(t('err_password_required'));
+                if (authPasscodeInput) authPasscodeInput.focus();
+                return;
+            }
+            if (authMode === 'register') {
+                if (password.length < 8) {
+                    showAuthError(t('err_password_min'));
+                    if (authPasscodeInput) authPasscodeInput.focus();
+                    return;
+                }
+                if (password !== confirmPassword) {
+                    showAuthError(t('err_password_mismatch'));
+                    if (authConfirmInput) authConfirmInput.focus();
+                    return;
+                }
+            }
+
+            const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
+            const bodyPayload = authMode === 'register'
+                ? { full_name: fullName, email: email, password: password }
+                : { email: email, password: password };
 
             try {
-                const res = await fetch('/api/auth/login', {
+                const res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: email, passcode: passcode })
+                    body: JSON.stringify(bodyPayload)
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -184,16 +280,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         resumeAction();
                     }
                 } else {
-                    if (authErrorMsg) {
-                        authErrorMsg.textContent = data.error || t('err_auth_failed');
-                        authErrorMsg.style.display = 'block';
-                    }
+                    const translated = data.error_code ? t(data.error_code) : null;
+                    const msg = (translated && translated !== data.error_code) ? translated : (data.error || t('err_auth_failed'));
+                    showAuthError(msg);
                 }
             } catch (err) {
-                if (authErrorMsg) {
-                    authErrorMsg.textContent = t('err_server_conn') + err.message;
-                    authErrorMsg.style.display = 'block';
-                }
+                showAuthError(t('err_server_conn') + err.message);
             }
         });
     }
@@ -209,7 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAuthStatus().then(() => {
         const params = new URLSearchParams(window.location.search);
         const demoDomain = (params.get('demo') || '').trim().toLowerCase();
-        if (['sales', 'marketing', 'hr', 'inventory', 'finance'].includes(demoDomain)) {
+        if (['sales', 'marketing', 'hr', 'inventory', 'finance', 'generic'].includes(demoDomain)) {
             if (window.history && window.history.replaceState) {
                 params.delete('demo');
                 const cleanSearch = params.toString();
@@ -525,7 +617,11 @@ document.addEventListener('DOMContentLoaded', () => {
         gsheetsForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const url = gsheetsUrlInput ? gsheetsUrlInput.value.trim() : '';
-            if (!url) return;
+            if (!url) {
+                alert(t('err_gsheets_url_required'));
+                if (gsheetsUrlInput) gsheetsUrlInput.focus();
+                return;
+            }
             requireWorkspaceAuth(() => ingestGoogleSheetUrl(url));
         });
     }

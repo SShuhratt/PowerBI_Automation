@@ -20,10 +20,12 @@ import pandas as pd
 from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, make_response, redirect, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import re
 from cleaner import SelfHealingCleaner
 from pbi_model import PowerBIModelGenerator
-from domain_classifier import DomainClassifier, DOMAINS
+from domain_classifier import DomainClassifier, DOMAINS, GENERIC_DOMAIN_INFO
 from session_store import sessions
+from security_vault import users_vault, normalize_email
 from dashboard_preview import generate_html_dashboard
 from pbip_generator import generate_pbip_artifacts
 from google_sheets import fetch_google_sheets_csv, extract_google_sheets_csv_url
@@ -54,6 +56,12 @@ AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "true").lower() in ("true", "1", "
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
     SECRET_KEY = hashlib.sha256(f"autobi_secure_salt_{WORKSPACE_PASSCODE}".encode()).hexdigest()
+
+# Optional bootstrap user account (configured strictly via environment variables)
+_BOOTSTRAP_EMAIL = os.environ.get("BOOTSTRAP_USER_EMAIL", "").strip()
+_BOOTSTRAP_PASSWORD = os.environ.get("BOOTSTRAP_USER_PASSWORD", "").strip()
+if _BOOTSTRAP_EMAIL and _BOOTSTRAP_PASSWORD:
+    users_vault.ensure_bootstrap_user(_BOOTSTRAP_EMAIL, _BOOTSTRAP_PASSWORD, full_name="Workspace Owner", role="admin")
 
 # In-memory IP rate limiter for login attempts (max 5 failed attempts per 15 min)
 FAILED_LOGINS = {}
@@ -247,6 +255,17 @@ def generate_synthetic_demo_df(domain: str) -> pd.DataFrame:
             {"sku": "SKU-AC-005", "product_name": "USB-C Multiport Adapter", "category": "Accessories", "warehouse": "Central Depot", "units_on_hand": 450, "reorder_level": 100, "unit_cost": 14.5, "lead_time_days": 7},
             {"sku": "SKU-AC-006", "product_name": "Wireless Vertical Mouse", "category": "Accessories", "warehouse": "East Coast Hub", "units_on_hand": 18, "reorder_level": 30, "unit_cost": 28.0, "lead_time_days": 10},
             {"sku": "Total SKU Summary", "product_name": "Total Stock", "category": "All", "warehouse": "Network", "units_on_hand": 641, "reorder_level": 247, "unit_cost": 742.5, "lead_time_days": 13.6},
+        ]
+        return pd.DataFrame(data)
+
+    elif domain == "generic":
+        data = [
+            {"ticket_id": "OPS-401", "service_date": "2026-01-10", "hub_region": "Tashkent Central", "team_lead": "Aziz Karimov", "sla_hours": 3.4, "cases_resolved": 42, "csat_score": 4.8},
+            {"ticket_id": "OPS-402", "service_date": "2026-01-12", "hub_region": "Samarkand Hub", "team_lead": "Dilnoza Aliyeva", "sla_hours": 4.1, "cases_resolved": 35, "csat_score": 4.6},
+            {"ticket_id": "OPS-403", "service_date": "2026-01-14", "hub_region": "Bukhara West", "team_lead": "Timur Rustamov", "sla_hours": 5.2, "cases_resolved": 28, "csat_score": 4.4},
+            {"ticket_id": "OPS-404", "service_date": "2026-01-16", "hub_region": "Tashkent Central", "team_lead": "Aziz Karimov", "sla_hours": 2.9, "cases_resolved": 49, "csat_score": 4.9},
+            {"ticket_id": "OPS-405", "service_date": "2026-01-19", "hub_region": "Fergana Valley", "team_lead": "Madina Umarova", "sla_hours": 3.8, "cases_resolved": 37, "csat_score": 4.7},
+            {"ticket_id": "Total Summary", "service_date": None, "hub_region": "All Hubs", "team_lead": None, "sla_hours": 3.88, "cases_resolved": 191, "csat_score": 4.68},
         ]
         return pd.DataFrame(data)
 
@@ -655,7 +674,7 @@ HOW TO USE IN POWER BI DESKTOP IN 60 SECONDS:
             "all_domains": [
                 {"key": k, "label": v["label"], "icon": v["icon"]}
                 for k, v in DOMAINS.items()
-            ]
+            ] + [{"key": "generic", "label": GENERIC_DOMAIN_INFO["label"], "icon": GENERIC_DOMAIN_INFO["icon"]}]
         },
         "kpis": kpis,
         "charts": charts,
@@ -769,6 +788,22 @@ def apple_touch_icon():
     )
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _attach_auth_cookie(res, email: str):
+    signed_token = sign_auth_token(email)
+    res.set_cookie(
+        "autobi_user",
+        signed_token,
+        max_age=30 * 86400,
+        httponly=True,
+        samesite="Lax",
+        secure=_is_https_request(),
+    )
+    return res
+
+
 @app.route("/api/auth/status")
 def auth_status():
     user = get_current_user()
@@ -779,39 +814,118 @@ def auth_status():
     })
 
 
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    client_ip = get_client_ip()
+    if not check_login_rate_limit(client_ip):
+        return jsonify({
+            "success": False,
+            "error_code": "err_rate_limit",
+            "error": "Too many failed attempts. Please wait 15 minutes before trying again."
+        }), 429
+
+    data = request.get_json(silent=True) or {}
+    email = normalize_email(data.get("email") or "")
+    password = (data.get("password") or data.get("passcode") or "").strip()
+    full_name = (data.get("full_name") or "").strip()
+
+    if not email:
+        return jsonify({"success": False, "error_code": "err_email_required", "error": "Please enter your work email."}), 400
+    if not _EMAIL_RE.match(email):
+        return jsonify({"success": False, "error_code": "err_email_invalid", "error": "Please enter a valid email address."}), 400
+    if len(password) < 8:
+        return jsonify({"success": False, "error_code": "err_password_min", "error": "Password must be at least 8 characters."}), 400
+
+    created, result = users_vault.create_user(email, password, full_name=full_name)
+    if not created:
+        return jsonify({
+            "success": False,
+            "error_code": "auth_email_exists",
+            "error": "An account with this email already exists. Please sign in instead."
+        }), 409
+
+    reset_failed_logins(client_ip)
+    res = jsonify({
+        "success": True,
+        "message": "Account created and workspace authenticated.",
+        "user": email,
+        "full_name": result.get("full_name", "")
+    })
+    return _attach_auth_cookie(res, email)
+
+
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():
     client_ip = get_client_ip()
     if not check_login_rate_limit(client_ip):
         return jsonify({
             "success": False,
+            "error_code": "err_rate_limit",
             "error": "Too many failed login attempts. Please wait 15 minutes before trying again."
         }), 429
 
     data = request.get_json(silent=True) or {}
-    passcode = data.get("passcode", "").strip()
-    email = data.get("email", "").strip() or "analyst@enterprise.local"
+    has_email_field = "email" in data
+    raw_email = (data.get("email") or "").strip()
+    email = normalize_email(raw_email)
+    secret = (data.get("password") or data.get("passcode") or "").strip()
 
-    if not passcode or not hmac.compare_digest(passcode, WORKSPACE_PASSCODE):
+    if has_email_field or "password" in data:
+        if not email:
+            return jsonify({"success": False, "error_code": "err_email_required", "error": "Please enter your work email."}), 400
+        if not _EMAIL_RE.match(email):
+            return jsonify({"success": False, "error_code": "err_email_invalid", "error": "Please enter a valid email address."}), 400
+
+    if not secret:
         record_failed_login(client_ip)
-        return jsonify({"success": False, "error": "Invalid workspace access passcode."}), 401
+        return jsonify({"success": False, "error_code": "err_password_required", "error": "Please enter your password."}), 400
+
+    if email:
+        auth_state, profile = users_vault.authenticate_user(email, secret)
+        if auth_state == "ok":
+            reset_failed_logins(client_ip)
+            res = jsonify({
+                "success": True,
+                "message": "Workspace successfully authenticated.",
+                "user": email,
+                "full_name": (profile or {}).get("full_name", "")
+            })
+            return _attach_auth_cookie(res, email)
+        if auth_state == "invalid_password":
+            record_failed_login(client_ip)
+            return jsonify({
+                "success": False,
+                "error_code": "err_invalid_credentials",
+                "error": "Invalid email or password."
+            }), 401
+        # Unregistered email: allow legacy workspace passcode ONLY if it explicitly matches WORKSPACE_PASSCODE
+        if hmac.compare_digest(secret, WORKSPACE_PASSCODE):
+            reset_failed_logins(client_ip)
+            res = jsonify({
+                "success": True,
+                "message": "Workspace successfully authenticated.",
+                "user": email
+            })
+            return _attach_auth_cookie(res, email)
+        record_failed_login(client_ip)
+        return jsonify({
+            "success": False,
+            "error_code": "err_account_or_password",
+            "error": "Account not found or invalid password. New users can switch to Create Account."
+        }), 401
+
+    # API passcode-only compatibility (no email supplied)
+    if not hmac.compare_digest(secret, WORKSPACE_PASSCODE):
+        record_failed_login(client_ip)
+        return jsonify({"success": False, "error_code": "err_invalid_credentials", "error": "Invalid workspace access passcode."}), 401
 
     reset_failed_logins(client_ip)
-    signed_token = sign_auth_token(email)
     res = jsonify({
         "success": True,
         "message": "Workspace successfully authenticated.",
-        "user": email
+        "user": "workspace-api@autobi.local"
     })
-    res.set_cookie(
-        "autobi_user",
-        signed_token,
-        max_age=30 * 86400,
-        httponly=True,
-        samesite="Lax",
-        secure=_is_https_request(),
-    )
-    return res
+    return _attach_auth_cookie(res, "workspace-api@autobi.local")
 
 
 @app.route("/api/auth/logout", methods=["POST"])

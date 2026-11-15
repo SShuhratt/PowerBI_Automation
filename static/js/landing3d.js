@@ -728,6 +728,13 @@
         prev: [0.64, 0.44, 0.52, 0.34, 0.46],
         curr: [0.82, 0.40, 0.74, 0.29, 0.68],
         deltas: ["+28.1%", "-9.1%", "+42.3%", "-14.7%", "+47.8%"]
+      },
+      generic: {
+        dax: "Total_Custom_Metric = SUM('DataTable'[Primary_Value])",
+        labels: ["Col-1", "Col-2", "Col-3", "Col-4", "Col-5"],
+        prev: [0.46, 0.52, 0.40, 0.61, 0.55],
+        curr: [0.71, 0.78, 0.64, 0.85, 0.82],
+        deltas: ["+54.3%", "+50.0%", "+60.0%", "+39.3%", "+49.1%"]
       }
     };
 
@@ -740,7 +747,10 @@
       if (domTitle) domTitle.textContent = t("dom_" + dom + "_name", dom);
       if (domSub) domSub.textContent = t("dom_" + dom + "_sub", "");
       if (domDax) domDax.textContent = cfg.dax;
-      if (domCta) domCta.textContent = t("dom_cta_btn", "Launch AutoBI Studio →");
+      if (domCta) {
+        domCta.textContent = t("dom_cta_btn", "Launch AutoBI Studio →");
+        domCta.setAttribute("href", "/studio?demo=" + encodeURIComponent(dom));
+      }
       if (m1Lbl) m1Lbl.textContent = t("dom_" + dom + "_m1_lbl", "");
       if (m1Val) m1Val.textContent = t("dom_" + dom + "_m1_val", "");
       if (m2Lbl) m2Lbl.textContent = t("dom_" + dom + "_m2_lbl", "");

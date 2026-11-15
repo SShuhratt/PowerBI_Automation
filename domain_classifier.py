@@ -74,6 +74,14 @@ DOMAINS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+GENERIC_DOMAIN_INFO: Dict[str, Any] = {
+    "label": "Custom / Universal Schema",
+    "icon": "🧩",
+    "table_name": "DataTable",
+    "confidence": 100.0,
+    "matched_signals": ["auto-schema-inference"],
+}
+
 
 class DomainClassifier:
     """Classifies a dataset into an operational business domain based on column signatures."""
@@ -120,16 +128,16 @@ class DomainClassifier:
         if top_score < 2.0:
             return {
                 "domain": "generic",
-                "label": "General Business Data",
-                "icon": "📊",
-                "table_name": "DataTable",
-                "confidence": 60.0,
-                "matched_signals": [],
+                "label": GENERIC_DOMAIN_INFO["label"],
+                "icon": GENERIC_DOMAIN_INFO["icon"],
+                "table_name": GENERIC_DOMAIN_INFO["table_name"],
+                "confidence": 85.0,
+                "matched_signals": ["universal-column-inference"],
                 "scores": scores,
                 "all_domains": [
                     {"key": k, "label": v["label"], "icon": v["icon"]}
                     for k, v in DOMAINS.items()
-                ]
+                ] + [{"key": "generic", "label": GENERIC_DOMAIN_INFO["label"], "icon": GENERIC_DOMAIN_INFO["icon"]}]
             }
 
         # Calculate confidence percentage (capped at 99%)

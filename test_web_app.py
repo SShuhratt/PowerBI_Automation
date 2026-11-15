@@ -830,11 +830,127 @@ def test_cybersecurity_and_hardening():
     print("[PASS] test_cybersecurity_and_hardening (View-only shared link, HMAC cookie signing, login rate limiter, DDE sanitization, SSRF guard, security headers)")
 
 
+def test_encrypted_user_vault_and_registration():
+    """Verify zero credential prefill, user registration, salted scrypt passwords, and AES-256-GCM DB encryption."""
+    import sqlite3
+    import uuid
+    from security_vault import users_vault, blind_index_email
+    from session_store import sessions
+
+    client = app.test_client()
+
+    # 1. Auth modal in /studio must NEVER prefill analyst@enterprise.local and must use novalidate
+    studio_html = client.get("/studio").data.decode("utf-8")
+    assert "analyst@enterprise.local" not in studio_html
+    assert 'id="authForm"' in studio_html
+    assert "novalidate" in studio_html
+    assert 'id="authTabRegister"' in studio_html
+
+    # 2. Register a unique user via /api/auth/register
+    test_email = f"vault_{uuid.uuid4().hex[:8]}@autobi.uz"
+    test_pw = "StrongPass#2026!"
+    reg_res = client.post("/api/auth/register", json={
+        "full_name": "Test Analyst",
+        "email": test_email,
+        "password": test_pw,
+    })
+    assert reg_res.status_code == 200
+    assert reg_res.get_json()["success"] is True
+    assert reg_res.get_json()["user"] == test_email
+
+    # Duplicate email registration must fail with 409
+    dup_res = client.post("/api/auth/register", json={"email": test_email, "password": test_pw})
+    assert dup_res.status_code == 409
+    assert dup_res.get_json()["error_code"] == "auth_email_exists"
+
+    # Registered user must NOT accept legacy shared passcode instead of their real password
+    client.post("/api/auth/logout")
+    bypass_res = client.post("/api/auth/login", json={"email": test_email, "password": "autobi2026"})
+    assert bypass_res.status_code == 401
+
+    # Registered user signs in cleanly with their own password
+    login_res = client.post("/api/auth/login", json={"email": test_email, "password": test_pw})
+    assert login_res.status_code == 200
+    assert login_res.get_json()["user"] == test_email
+
+    # 3. Verify raw DB rows have zero plaintext email, name, password, or spreadsheet payloads
+    e_hash = blind_index_email(test_email)
+    with sqlite3.connect(users_vault.db_path) as conn:
+        u_row = conn.execute(
+            "SELECT email_hash, encrypted_profile, password_hash FROM users WHERE email_hash = ?;",
+            (e_hash,),
+        ).fetchone()
+    assert u_row is not None
+    assert u_row[0] == e_hash
+    assert u_row[1].startswith("enc:v1:")
+    assert test_email not in u_row[1]
+    assert "Test Analyst" not in u_row[1]
+    assert u_row[2].startswith("scrypt$")
+    assert test_pw not in u_row[2]
+
+    # Trigger an encrypted session write via /api/sample
+    sample_res = client.post("/api/sample", json={"domain": "generic"})
+    assert sample_res.status_code == 200
+    sid = sample_res.get_json()["session_id"]
+    with sqlite3.connect(sessions.db_path) as conn:
+        s_row = conn.execute("SELECT payload FROM sessions WHERE session_id = ?;", (sid,)).fetchone()
+    assert s_row is not None
+    assert s_row[0].startswith("enc:v1:")
+    assert "Tashkent Central" not in s_row[0]
+    assert "Aziz Karimov" not in s_row[0]
+    client.post(f"/api/purge/{sid}")
+    print("[PASS] test_encrypted_user_vault_and_registration (Zero prefill, registration, scrypt & AES-256-GCM DB at rest)")
+
+
+def test_custom_generic_schema_and_sticky_header():
+    """Verify universal/custom dataset support (any columns -> BI) and sticky persistent navbar."""
+    client = app.test_client()
+
+    # 1. Custom CSV completely unrelated to the 5 domains (e.g., Clinic Visits / SLA)
+    custom_csv = (
+        "clinic_id,visit_date,doctor_specialty,patient_wait_minutes,visit_fee_points\n"
+        "CL-101,2026-02-01,Cardiology,14.5,120\n"
+        "CL-102,2026-02-02,Neurology,22.0,150\n"
+        "CL-103,2026-02-03,Cardiology,11.0,130\n"
+    )
+    res = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(custom_csv.encode("utf-8")), "clinic_custom.csv")},
+        content_type="multipart/form-data",
+        headers=AUTH_HEADERS,
+    )
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["domain"]["key"] == "generic"
+    assert len(data["kpis"]) >= 5
+    dax_names = [m["name"] for m in data["dax_measures"]]
+    assert "Total Records" in dax_names
+    assert any("Wait Minutes" in n or "Visit Fee" in n for n in dax_names)
+
+    # 2. Download custom dataset ZIP
+    sid = data["session_id"]
+    dl = client.get(f"/api/download/{sid}", headers=AUTH_HEADERS)
+    assert dl.status_code == 200
+    assert dl.mimetype == "application/zip"
+    client.post(f"/api/purge/{sid}", headers=AUTH_HEADERS)
+
+    # 3. Sticky header CSS verification
+    css_res = client.get("/static/css/style.css")
+    assert css_res.status_code == 200
+    css_text = css_res.data.decode("utf-8")
+    assert "position: sticky;" in css_text
+    assert "--bg-header-sticky" in css_text
+    print("[PASS] test_custom_generic_schema_and_sticky_header (Custom dataset BI pipeline & persistent sticky header)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
     test_brand_assets()
     test_legal_pages()
+    test_encrypted_user_vault_and_registration()
+    test_custom_generic_schema_and_sticky_header()
     test_api_sample()
     test_api_upload_csv()
     test_session_persistence()

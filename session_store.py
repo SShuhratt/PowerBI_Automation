@@ -12,6 +12,8 @@ import sqlite3
 import time
 from typing import Optional, Dict, Any
 
+from security_vault import encrypt_json, decrypt_json
+
 
 class SessionStore:
     def __init__(self, db_path: str = None, redis_url: str = None, default_ttl_seconds: int = 7200):
@@ -65,18 +67,18 @@ class SessionStore:
         ttl = ttl_seconds if ttl_seconds is not None else self.default_ttl
         now = time.time()
         expires_at = now + ttl
+        aad = session_id.encode("utf-8")
+        encrypted_payload = encrypt_json(data, aad=aad)
 
         if self.backend == "redis" and self.redis_client:
             try:
-                serialized = json.dumps(data, ensure_ascii=False, default=str)
-                self.redis_client.set(f"session:{session_id}", serialized, ex=ttl)
+                self.redis_client.set(f"session:{session_id}", encrypted_payload, ex=ttl)
                 return True
             except Exception as e:
                 print(f"[SessionStore] Redis set error: {e}")
 
         # Fallback to SQLite
         try:
-            serialized = json.dumps(data, ensure_ascii=False, default=str)
             with self._get_sqlite_conn() as conn:
                 conn.execute("""
                     INSERT INTO sessions (session_id, payload, created_at, expires_at)
@@ -85,7 +87,7 @@ class SessionStore:
                         payload=excluded.payload,
                         created_at=excluded.created_at,
                         expires_at=excluded.expires_at;
-                """, (session_id, serialized, now, expires_at))
+                """, (session_id, encrypted_payload, now, expires_at))
             return True
         except Exception as e:
             print(f"[SessionStore] SQLite set error: {e}")
@@ -93,11 +95,12 @@ class SessionStore:
 
     def get(self, session_id: str) -> Optional[Dict[str, Any]]:
         now = time.time()
+        aad = session_id.encode("utf-8")
         if self.backend == "redis" and self.redis_client:
             try:
                 raw = self.redis_client.get(f"session:{session_id}")
                 if raw:
-                    return json.loads(raw)
+                    return decrypt_json(raw, aad=aad)
                 return None
             except Exception as e:
                 print(f"[SessionStore] Redis get error: {e}")
@@ -112,7 +115,7 @@ class SessionStore:
                 if row:
                     payload_str, expires_at = row
                     if expires_at > now:
-                        return json.loads(payload_str)
+                        return decrypt_json(payload_str, aad=aad)
                     else:
                         # Expired
                         conn.execute("DELETE FROM sessions WHERE session_id = ?;", (session_id,))

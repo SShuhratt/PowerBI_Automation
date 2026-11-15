@@ -8,7 +8,7 @@ import os
 from typing import List, Dict, Any
 import pandas as pd
 
-from domain_classifier import DomainClassifier, DOMAINS
+from domain_classifier import DomainClassifier, DOMAINS, GENERIC_DOMAIN_INFO
 
 
 class PowerBIModelGenerator:
@@ -27,9 +27,13 @@ class PowerBIModelGenerator:
         self.audit_log = audit_log or {}
 
         # Domain classification
-        if domain and domain in DOMAINS:
-            self.domain = domain
-            self.domain_info = DOMAINS[domain]
+        normalized_domain = "generic" if domain == "custom" else domain
+        if normalized_domain == "generic":
+            self.domain = "generic"
+            self.domain_info = GENERIC_DOMAIN_INFO
+        elif normalized_domain and normalized_domain in DOMAINS:
+            self.domain = normalized_domain
+            self.domain_info = DOMAINS[normalized_domain]
         else:
             classifier = DomainClassifier(df)
             detected = classifier.classify()
@@ -103,8 +107,10 @@ class PowerBIModelGenerator:
             measures.extend(self._generate_inventory_measures(cols))
         elif self.domain == "finance":
             measures.extend(self._generate_finance_measures(cols))
+        elif self.domain == "generic":
+            measures.extend(self._generate_generic_measures(cols))
         else:
-            # Sales domain (or generic)
+            # Sales domain
             measures.extend(self._generate_sales_measures(cols))
 
         # If no domain-specific measures were triggered, provide fallback statistical measures

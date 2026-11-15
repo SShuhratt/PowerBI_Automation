@@ -112,7 +112,7 @@
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px; max-width: 540px; margin-left: auto; margin-right: auto;" data-i18n="gsheets_sub">
                     Paste your public Google Sheets link. AutoBI cleans it and creates a Power BI model configured with live 1-click cloud refresh.
                 </p>
-                <form id="gsheetsForm" style="display: flex; gap: 10px; max-width: 640px; margin: 0 auto; flex-wrap: wrap;">
+                <form id="gsheetsForm" novalidate style="display: flex; gap: 10px; max-width: 640px; margin: 0 auto; flex-wrap: wrap;">
                     <input type="url" id="gsheetsUrlInput" class="gsheets-input" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" data-i18n-placeholder="gsheets_placeholder" required>
                     <button type="submit" id="gsheetsSubmitBtn" class="btn btn-primary" style="padding: 12px 24px;" data-i18n="gsheets_submit">
                         ⚡ Ingest & Model
@@ -131,6 +131,7 @@
                     <button type="button" class="demo-pill-btn" data-domain="marketing" data-i18n="demo_marketing">📣 Marketing & Paid Media</button>
                     <button type="button" class="demo-pill-btn" data-domain="hr" data-i18n="demo_hr">👥 HR & People Ops</button>
                     <button type="button" class="demo-pill-btn" data-domain="inventory" data-i18n="demo_inventory">📦 Inventory & Supply Chain</button>
+                    <button type="button" class="demo-pill-btn" data-domain="generic" data-i18n="demo_generic">🧩 Custom Dataset (Any Schema)</button>
                 </div>
             </div>
 
@@ -200,6 +201,7 @@
                                 <option value="hr" data-i18n="opt_hr">👥 HR & People Ops</option>
                                 <option value="inventory" data-i18n="opt_inventory">📦 Inventory & Supply</option>
                                 <option value="finance" data-i18n="opt_finance">💳 Finance & Accounting</option>
+                                <option value="generic" data-i18n="opt_generic">🧩 Custom / Any Dataset</option>
                             </select>
                         </div>
                     </div>
@@ -323,25 +325,43 @@
                 <button type="button" id="closeAuthModalBtn" class="auth-modal-close" aria-label="Close modal">&times;</button>
                 <div class="auth-modal-header">
                     <img src="{{ url_for('static', filename='img/autobi-icon.svg') }}" alt="AutoBI Studio" class="brand-logo-img brand-logo-modal" width="52" height="52">
-                    <h3 data-i18n="auth_modal_title">Unlock AutoBI Workspace</h3>
-                    <p data-i18n="auth_modal_sub">Sign in with your work email and workspace passcode to analyze datasets, export Power BI packs, and dispatch reports.</p>
+                    <h3 id="authModalTitle" data-i18n="auth_modal_title">Unlock AutoBI Workspace</h3>
+                    <p id="authModalSub" data-i18n="auth_modal_sub">Sign in or create an account to analyze datasets, export Power BI packs, and dispatch encrypted reports.</p>
                 </div>
-                <form id="authForm" class="auth-form">
+
+                <div class="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
+                    <button type="button" id="authTabLogin" class="auth-mode-btn active" role="tab" aria-selected="true" data-auth-mode="login" data-i18n="auth_tab_signin">Sign In</button>
+                    <button type="button" id="authTabRegister" class="auth-mode-btn" role="tab" aria-selected="false" data-auth-mode="register" data-i18n="auth_tab_register">Create Account</button>
+                </div>
+
+                <form id="authForm" class="auth-form" autocomplete="off" novalidate>
+                    <div id="authFullNameGroup" class="auth-field" style="display: none;">
+                        <label for="authFullNameInput" data-i18n="auth_name_label">Full Name</label>
+                        <input type="text" id="authFullNameInput" name="full_name" autocomplete="name" placeholder="Your name or team" data-i18n-placeholder="auth_name_placeholder">
+                    </div>
                     <div class="auth-field">
                         <label for="authEmailInput" data-i18n="auth_email_label">Work Email</label>
-                        <input type="email" id="authEmailInput" placeholder="analyst@company.com" data-i18n-placeholder="auth_email_placeholder" required value="analyst@enterprise.local">
+                        <input type="email" id="authEmailInput" name="email" autocomplete="email" placeholder="name@company.com" data-i18n-placeholder="auth_email_placeholder">
                     </div>
                     <div class="auth-field">
-                        <label for="authPasscodeInput" data-i18n="auth_pass_label">Workspace Access Passcode</label>
-                        <input type="password" id="authPasscodeInput" placeholder="Enter access passcode" data-i18n-placeholder="auth_pass_placeholder" required>
+                        <label for="authPasscodeInput" data-i18n="auth_pass_label">Password</label>
+                        <input type="password" id="authPasscodeInput" name="password" autocomplete="current-password" placeholder="Enter your password" data-i18n-placeholder="auth_pass_placeholder">
+                    </div>
+                    <div id="authConfirmGroup" class="auth-field" style="display: none;">
+                        <label for="authConfirmInput" data-i18n="auth_confirm_label">Confirm Password</label>
+                        <input type="password" id="authConfirmInput" name="confirm_password" autocomplete="new-password" placeholder="Repeat password (min 8 characters)" data-i18n-placeholder="auth_confirm_placeholder">
                     </div>
                     <div id="authErrorMsg" class="auth-error-msg" style="display: none;"></div>
-                    <button type="submit" id="authSubmitBtn" class="btn btn-primary" style="width: 100%; margin-top: 14px; padding: 12px;" data-i18n="auth_submit_btn">
-                        🔓 Unlock Workspace
+                    <button type="submit" id="authSubmitBtn" class="btn btn-primary" style="width: 100%; margin-top: 8px; padding: 12px;" data-i18n="auth_submit_btn">
+                        🔓 Sign In to Workspace
                     </button>
+                    <div class="auth-switch-hint">
+                        <span id="authSwitchPrompt" data-i18n="auth_switch_no_account">New to AutoBI Studio?</span>
+                        <button type="button" id="authSwitchLinkBtn" class="auth-switch-link" data-i18n="auth_switch_create">Create an account</button>
+                    </div>
                 </form>
                 <div class="auth-footer">
-                    <span data-i18n="auth_footer_sec">🔒 Protected by isolated multi-worker session security & TLS encryption.</span>
+                    <span data-i18n="auth_footer_sec">🔒 Protected by AES-256-GCM database encryption & isolated TLS sessions.</span>
                     <div class="auth-support-line">
                         <span data-i18n="auth_footer_support">Need workspace access or support?</span> <a href="mailto:support@autobi.uz" class="support-link">support@autobi.uz</a>
                     </div>
@@ -396,7 +416,7 @@
                     <!-- Populated dynamically if needed -->
                 </div>
 
-                <form id="telegramDispatchForm" class="auth-form">
+                <form id="telegramDispatchForm" class="auth-form" novalidate>
                     <!-- Additional Recipients (Channels, Groups, Teammates) -->
                     <div class="auth-field">
                         <label for="telegramTargetsInput" data-i18n="tg_recipients_label">Recipients (Personal Chat, Channel, or Group Links)</label>
