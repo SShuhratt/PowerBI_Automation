@@ -52,7 +52,7 @@ def test_index_route():
     res = client.get("/")
     assert res.status_code == 200
     assert b"AutoBI Studio" in res.data
-    assert b"hero3dCanvas" in res.data
+    assert b"heroStoryStage" in res.data
     assert b"schema3dCanvas" in res.data
     assert b"domain3dCanvas" in res.data
     assert b"landing3d.js" in res.data
