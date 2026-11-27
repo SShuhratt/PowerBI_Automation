@@ -65,9 +65,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const logoutBtn = document.getElementById('logoutBtn');
     const tabModeFile = document.getElementById('tabModeFile');
     const tabModeGSheets = document.getElementById('tabModeGSheets');
+    const tabModeSql = document.getElementById('tabModeSql');
     const gsheetsSection = document.getElementById('gsheetsSection');
     const gsheetsForm = document.getElementById('gsheetsForm');
     const gsheetsUrlInput = document.getElementById('gsheetsUrlInput');
+    const sqlSection = document.getElementById('sqlSection');
+    const sqlForm = document.getElementById('sqlForm');
+    const sqlUriInput = document.getElementById('sqlUriInput');
+    const sqlQueryInput = document.getElementById('sqlQueryInput');
     const sendTelegramBtn = document.getElementById('sendTelegramBtn');
     const telegramModal = document.getElementById('telegramModal');
     const closeTelegramModalBtn = document.getElementById('closeTelegramModalBtn');
@@ -88,6 +93,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let isAuthenticated = false;
     let pendingAuthAction = null;
     let authMode = 'login'; // 'login' | 'register'
+    let activeFilters = {};
+    let activeDateRange = { from: '', to: '' };
+    let activeChartOverrides = {};
+    let currentReportId = null;
+    let pendingRefreshReportId = null;
+    const myReportsSection = document.getElementById('myReportsSection');
+    const myReportsGrid = document.getElementById('myReportsGrid');
+    const refreshFileInput = document.getElementById('refreshFileInput');
+    const saveReportBtn = document.getElementById('saveReportBtn');
+    const refreshReportBtn = document.getElementById('refreshReportBtn');
 
     function showAuthError(msg) {
         if (!authErrorMsg) return;
@@ -276,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (userEmailSpan) userEmailSpan.textContent = data.user || email;
                     }
                     if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                    loadSavedReports();
                     if (typeof resumeAction === 'function') {
                         resumeAction();
                     }
@@ -299,6 +315,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Call on load (and optionally launch ?demo=<domain> clicked from the 3D landing page)
     checkAuthStatus().then(() => {
+        if (isAuthenticated) {
+            loadSavedReports();
+        }
         const params = new URLSearchParams(window.location.search);
         const demoDomain = (params.get('demo') || '').trim().toLowerCase();
         if (['sales', 'marketing', 'hr', 'inventory', 'finance', 'generic'].includes(demoDomain)) {
@@ -429,9 +448,164 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (telegramModal) telegramModal.style.display = 'flex';
 
+            // Load existing digest schedule if a report is active
+            loadReportScheduleState();
+
             // Start polling for user /start
             if (tgPollTimer) clearInterval(tgPollTimer);
             tgPollTimer = setInterval(checkTelegramConnection, 1800);
+        });
+    }
+
+    const tgScheduleBadge = document.getElementById('tgScheduleBadge');
+    const tgScheduleCadence = document.getElementById('tgScheduleCadence');
+    const tgScheduleHour = document.getElementById('tgScheduleHour');
+    const tgAlertAnomaliesOnly = document.getElementById('tgAlertAnomaliesOnly');
+    const tgSaveScheduleBtn = document.getElementById('tgSaveScheduleBtn');
+    const tgTestRunScheduleBtn = document.getElementById('tgTestRunScheduleBtn');
+    const tgDeleteScheduleBtn = document.getElementById('tgDeleteScheduleBtn');
+
+    function gatherTelegramTargets() {
+        const list = [];
+        if (connectedChatId) list.push(String(connectedChatId));
+        const raw = telegramTargetsInput ? telegramTargetsInput.value.trim() : '';
+        if (raw) {
+            raw.split(/[,;\n\r]+/).forEach(p => {
+                const c = p.trim();
+                if (c && !list.includes(c)) list.push(c);
+            });
+        }
+        return list;
+    }
+
+    async function ensureSavedReportId() {
+        if (currentReportId) return currentReportId;
+        if (!currentSessionId || !lastRenderedData) return null;
+        const res = await fetch('/api/reports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSessionId,
+                title: lastRenderedData.filename || 'Scheduled AutoBI Report',
+            }),
+        });
+        const json = await res.json();
+        if (json.success && json.report) {
+            currentReportId = json.report.report_id;
+            lastRenderedData.report_meta = json.report;
+            if (saveReportBtn) saveReportBtn.style.display = 'none';
+            if (refreshReportBtn) refreshReportBtn.style.display = 'inline-flex';
+            loadSavedReports();
+            return currentReportId;
+        }
+        return null;
+    }
+
+    function applyScheduleUiState(sched) {
+        if (!tgScheduleBadge) return;
+        if (sched && sched.enabled) {
+            tgScheduleBadge.textContent = t('tg_sched_active');
+            tgScheduleBadge.classList.add('active');
+            if (tgScheduleCadence && sched.cadence) tgScheduleCadence.value = sched.cadence;
+            if (tgScheduleHour && sched.hour_utc !== undefined) tgScheduleHour.value = String(sched.hour_utc);
+            if (tgAlertAnomaliesOnly) tgAlertAnomaliesOnly.checked = Boolean(sched.alert_only_on_anomalies);
+            if (tgDeleteScheduleBtn) tgDeleteScheduleBtn.style.display = 'inline-flex';
+            if (telegramTargetsInput && (!telegramTargetsInput.value.trim()) && Array.isArray(sched.targets)) {
+                telegramTargetsInput.value = sched.targets.join(', ');
+            }
+        } else {
+            tgScheduleBadge.textContent = t('tg_sched_off');
+            tgScheduleBadge.classList.remove('active');
+            if (tgDeleteScheduleBtn) tgDeleteScheduleBtn.style.display = 'none';
+        }
+    }
+
+    async function loadReportScheduleState() {
+        if (!currentReportId) {
+            applyScheduleUiState(null);
+            return;
+        }
+        try {
+            const res = await fetch(`/api/reports/${encodeURIComponent(currentReportId)}/schedule`);
+            if (!res.ok) return;
+            const json = await res.json();
+            applyScheduleUiState(json.schedule);
+        } catch (_) {}
+    }
+
+    function showTgStatus(htmlMsg, isOk) {
+        if (!telegramStatusMsg) return;
+        telegramStatusMsg.style.display = 'block';
+        telegramStatusMsg.style.background = isOk ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)';
+        telegramStatusMsg.style.borderColor = isOk ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)';
+        telegramStatusMsg.style.color = isOk ? '#6ee7b7' : '#fcd34d';
+        telegramStatusMsg.innerHTML = htmlMsg;
+    }
+
+    if (tgSaveScheduleBtn) {
+        tgSaveScheduleBtn.addEventListener('click', async () => {
+            const targets = gatherTelegramTargets();
+            if (!targets.length) {
+                showTgStatus(escapeHtml(t('tg_need_target')), false);
+                return;
+            }
+            const rid = await ensureSavedReportId();
+            if (!rid) {
+                showTgStatus(escapeHtml(t('tg_session_expired')), false);
+                return;
+            }
+            const res = await fetch(`/api/reports/${encodeURIComponent(rid)}/schedule`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cadence: tgScheduleCadence ? tgScheduleCadence.value : 'weekly_mon',
+                    hour_utc: tgScheduleHour ? parseInt(tgScheduleHour.value, 10) : 4,
+                    targets: targets,
+                    alert_only_on_anomalies: Boolean(tgAlertAnomaliesOnly && tgAlertAnomaliesOnly.checked),
+                    enabled: true,
+                }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                applyScheduleUiState(json.schedule);
+                showTgStatus(escapeHtml(t('tg_sched_saved_ok')), true);
+            } else {
+                showTgStatus(escapeHtml(json.error || t('tg_send_fail')), false);
+            }
+        });
+    }
+
+    if (tgTestRunScheduleBtn) {
+        tgTestRunScheduleBtn.addEventListener('click', async () => {
+            const targets = gatherTelegramTargets();
+            const rid = await ensureSavedReportId();
+            if (!rid) {
+                showTgStatus(escapeHtml(t('tg_session_expired')), false);
+                return;
+            }
+            const res = await fetch(`/api/reports/${encodeURIComponent(rid)}/schedule/test-run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ targets }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                showTgStatus(escapeHtml(t('tg_sched_ran_ok')), true);
+            } else {
+                showTgStatus(escapeHtml(json.error || t('tg_send_fail')), false);
+            }
+        });
+    }
+
+    if (tgDeleteScheduleBtn) {
+        tgDeleteScheduleBtn.addEventListener('click', async () => {
+            if (!currentReportId) return;
+            const res = await fetch(`/api/reports/${encodeURIComponent(currentReportId)}/schedule`, { method: 'DELETE' });
+            const json = await res.json();
+            if (json.success) {
+                applyScheduleUiState(null);
+                showTgStatus(escapeHtml(t('tg_sched_disabled_ok')), true);
+            }
         });
     }
 
@@ -567,20 +741,59 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Ingestion Mode Toggles (File vs Google Sheets)
-    if (tabModeFile && tabModeGSheets && dropzone && gsheetsSection) {
-        tabModeFile.addEventListener('click', () => {
-            tabModeFile.classList.add('active');
-            tabModeGSheets.classList.remove('active');
-            dropzone.style.display = 'flex';
-            gsheetsSection.style.display = 'none';
-        });
+    // Ingestion Mode Toggles (File vs Google Sheets vs Read-Only SQL)
+    function setUploadMode(mode) {
+        if (tabModeFile) tabModeFile.classList.toggle('active', mode === 'file');
+        if (tabModeGSheets) tabModeGSheets.classList.toggle('active', mode === 'gsheets');
+        if (tabModeSql) tabModeSql.classList.toggle('active', mode === 'sql');
+        if (dropzone) dropzone.style.display = mode === 'file' ? 'flex' : 'none';
+        if (gsheetsSection) gsheetsSection.style.display = mode === 'gsheets' ? 'block' : 'none';
+        if (sqlSection) sqlSection.style.display = mode === 'sql' ? 'block' : 'none';
+    }
 
-        tabModeGSheets.addEventListener('click', () => {
-            tabModeGSheets.classList.add('active');
-            tabModeFile.classList.remove('active');
-            dropzone.style.display = 'none';
-            gsheetsSection.style.display = 'block';
+    if (tabModeFile) tabModeFile.addEventListener('click', () => setUploadMode('file'));
+    if (tabModeGSheets) tabModeGSheets.addEventListener('click', () => setUploadMode('gsheets'));
+    if (tabModeSql) tabModeSql.addEventListener('click', () => setUploadMode('sql'));
+
+    async function ingestSqlDatabase(uri, query) {
+        showLoading(t('loading_sql'));
+        try {
+            const res = await fetch('/api/ingest-sql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uri, query })
+            });
+            const data = await res.json();
+            if (res.status === 401 && data.auth_required) {
+                isAuthenticated = false;
+                uploadCard.style.display = 'block';
+                openAuthModal(() => ingestSqlDatabase(uri, query));
+                return;
+            }
+            if (data.success) {
+                renderResults(data);
+            } else {
+                alert(t('err_analysis') + (data.error || t('err_analysis_default')));
+                uploadCard.style.display = 'block';
+            }
+        } catch (err) {
+            alert(t('err_server_conn') + err.message);
+            uploadCard.style.display = 'block';
+        } finally {
+            hideLoading();
+        }
+    }
+
+    if (sqlForm) {
+        sqlForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const uri = sqlUriInput ? sqlUriInput.value.trim() : '';
+            const query = sqlQueryInput ? sqlQueryInput.value.trim() : '';
+            if (!uri || !query) {
+                alert(t('err_sql_required'));
+                return;
+            }
+            requireWorkspaceAuth(() => ingestSqlDatabase(uri, query));
         });
     }
 
@@ -802,7 +1015,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderResults(data) {
         lastRenderedData = data;
         currentSessionId = data.session_id;
+        currentReportId = (data.report_meta && data.report_meta.report_id) ? data.report_meta.report_id : null;
         activeFileBadge.textContent = data.is_live_url ? t('source_live_gsheet', { filename: data.filename }) : data.filename;
+
+        if (saveReportBtn) {
+            saveReportBtn.style.display = currentReportId ? 'none' : 'inline-flex';
+            saveReportBtn.disabled = false;
+            saveReportBtn.textContent = t('btn_save_report');
+        }
+        if (refreshReportBtn) {
+            refreshReportBtn.style.display = currentReportId ? 'inline-flex' : 'none';
+        }
 
         // 1. Domain Badge & Switcher
         const dom = data.domain;
@@ -915,6 +1138,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 3. Dynamic Charts
         renderCharts(data.charts);
 
+        // 3b. Interactive Top-Bar Slicers & Chart Builder Controls
+        setupInteractiveControls(data);
+
         // 4. Audit Trail
         renderAuditTrail(data.audit_log);
 
@@ -939,6 +1165,230 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // --- Phase 2: Interactive Slicers & Chart Builder ---
+    let interactiveQueryTimer = null;
+    async function runInteractiveQuery() {
+        if (!currentSessionId || !lastRenderedData) return;
+        try {
+            const res = await fetch(`/api/session/${currentSessionId}/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filters: activeFilters,
+                    date_from: activeDateRange.from,
+                    date_to: activeDateRange.to,
+                    chart_overrides: activeChartOverrides,
+                    save: true,
+                }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) return;
+
+            lastRenderedData.kpis = json.kpis;
+            lastRenderedData.charts = json.charts;
+            lastRenderedData.table_records = json.table_records;
+
+            renderKpis(json.kpis);
+            renderCharts(json.charts);
+            const displayLabels = lastRenderedData.display_labels || (lastRenderedData.audit_log && lastRenderedData.audit_log.display_labels) || {};
+            renderTable(lastRenderedData.table_columns, json.table_records, displayLabels);
+
+            const countPill = document.getElementById('slicerCountBadge');
+            if (countPill) {
+                countPill.textContent = t('slicer_rows', {
+                    filtered: json.row_count,
+                    total: json.total_row_count
+                });
+            }
+        } catch (_) {}
+    }
+
+    function setupInteractiveControls(data) {
+        activeFilters = {};
+        activeDateRange = { from: '', to: '' };
+        activeChartOverrides = (data && data.chart_overrides && typeof data.chart_overrides === 'object')
+            ? JSON.parse(JSON.stringify(data.chart_overrides))
+            : {};
+
+        const schema = (data && data.interactive_schema) || {};
+        const slicers = schema.slicers || [];
+        const dateCol = schema.date_col || null;
+        const dims = schema.dimension_cols || [];
+        const nums = schema.numeric_cols || [];
+
+        const slicerBar = document.getElementById('slicerBar');
+        const slicerInputs = document.getElementById('slicerInputs');
+        const countPill = document.getElementById('slicerCountBadge');
+        const resetSlicersBtn = document.getElementById('resetSlicersBtn');
+
+        if (slicerBar && slicerInputs) {
+            slicerInputs.innerHTML = '';
+            const hasSlicers = slicers.length > 0 || Boolean(dateCol);
+            slicerBar.style.display = hasSlicers ? 'flex' : 'none';
+
+            slicers.forEach(s => {
+                const wrap = document.createElement('label');
+                wrap.className = 'slicer-field';
+                const lbl = document.createElement('span');
+                lbl.textContent = s.label;
+                const sel = document.createElement('select');
+                sel.className = 'slicer-select';
+                sel.setAttribute('data-filter-col', s.key);
+                const optAll = document.createElement('option');
+                optAll.value = '__all__';
+                optAll.textContent = `${s.label}: ${t('slicer_all')}`;
+                sel.appendChild(optAll);
+                (s.values || []).forEach(v => {
+                    const o = document.createElement('option');
+                    o.value = v;
+                    o.textContent = v;
+                    sel.appendChild(o);
+                });
+                sel.onchange = () => {
+                    if (sel.value === '__all__') {
+                        delete activeFilters[s.key];
+                    } else {
+                        activeFilters[s.key] = sel.value;
+                    }
+                    runInteractiveQuery();
+                };
+                wrap.appendChild(lbl);
+                wrap.appendChild(sel);
+                slicerInputs.appendChild(wrap);
+            });
+
+            if (dateCol) {
+                const dWrap = document.createElement('div');
+                dWrap.className = 'slicer-date-group';
+                const dLbl = document.createElement('span');
+                dLbl.textContent = dateCol.label;
+                const inpFrom = document.createElement('input');
+                inpFrom.type = 'date';
+                inpFrom.className = 'slicer-select slicer-date';
+                inpFrom.value = dateCol.min || '';
+                inpFrom.min = dateCol.min || '';
+                inpFrom.max = dateCol.max || '';
+                const inpTo = document.createElement('input');
+                inpTo.type = 'date';
+                inpTo.className = 'slicer-select slicer-date';
+                inpTo.value = dateCol.max || '';
+                inpTo.min = dateCol.min || '';
+                inpTo.max = dateCol.max || '';
+                const onDateChange = () => {
+                    activeDateRange.from = inpFrom.value || '';
+                    activeDateRange.to = inpTo.value || '';
+                    clearTimeout(interactiveQueryTimer);
+                    interactiveQueryTimer = setTimeout(runInteractiveQuery, 150);
+                };
+                inpFrom.onchange = onDateChange;
+                inpTo.onchange = onDateChange;
+                dWrap.appendChild(dLbl);
+                dWrap.appendChild(inpFrom);
+                dWrap.appendChild(inpTo);
+                slicerInputs.appendChild(dWrap);
+            }
+
+            if (countPill) {
+                const totalRows = (data.audit_log && data.audit_log.cleaned_row_count) || (data.table_records ? data.table_records.length : 0);
+                countPill.textContent = t('slicer_rows', { filtered: totalRows, total: totalRows });
+            }
+
+            if (resetSlicersBtn) {
+                resetSlicersBtn.onclick = () => {
+                    activeFilters = {};
+                    activeDateRange = { from: '', to: '' };
+                    slicerInputs.querySelectorAll('select[data-filter-col]').forEach(el => { el.value = '__all__'; });
+                    if (dateCol) {
+                        const dateInputs = slicerInputs.querySelectorAll('input[type="date"]');
+                        if (dateInputs[0]) dateInputs[0].value = dateCol.min || '';
+                        if (dateInputs[1]) dateInputs[1].value = dateCol.max || '';
+                    }
+                    runInteractiveQuery();
+                };
+            }
+        }
+
+        // Toggle chart builder toolbars
+        document.querySelectorAll('.chart-customize-toggle[data-target]').forEach(btn => {
+            btn.onclick = () => {
+                const targetEl = document.getElementById(btn.getAttribute('data-target'));
+                if (!targetEl) return;
+                const open = targetEl.style.display !== 'flex';
+                targetEl.style.display = open ? 'flex' : 'none';
+                btn.classList.toggle('active', open);
+            };
+        });
+
+        // Populate chart builder selects for chart1 & chart2
+        ['chart1', 'chart2'].forEach((slot, idx) => {
+            const bar = document.getElementById(`${slot}Controls`);
+            if (!bar) return;
+            const typeSel = bar.querySelector('.cb-type');
+            const dimSel = bar.querySelector('.cb-dim');
+            const metricSel = bar.querySelector('.cb-metric');
+            const aggSel = bar.querySelector('.cb-agg');
+            const currentCfg = (data.charts && data.charts[slot]) || {};
+            const savedSpec = activeChartOverrides[slot] || {};
+
+            if (dimSel) {
+                dimSel.innerHTML = '';
+                dims.forEach(d => {
+                    const o = document.createElement('option');
+                    o.value = d.key;
+                    o.textContent = d.label;
+                    dimSel.appendChild(o);
+                });
+                if (savedSpec.dim && dims.some(d => d.key === savedSpec.dim)) {
+                    dimSel.value = savedSpec.dim;
+                } else if (dims.length > idx) {
+                    dimSel.value = dims[idx].key;
+                }
+            }
+            if (metricSel) {
+                metricSel.innerHTML = '';
+                nums.forEach(m => {
+                    const o = document.createElement('option');
+                    o.value = m.key;
+                    o.textContent = m.label;
+                    metricSel.appendChild(o);
+                });
+                const cntOpt = document.createElement('option');
+                cntOpt.value = '__count__';
+                cntOpt.textContent = t('cb_record_count');
+                metricSel.appendChild(cntOpt);
+
+                if (savedSpec.metric) {
+                    metricSel.value = savedSpec.metric;
+                } else if (nums.length > 0) {
+                    metricSel.value = nums[0].key;
+                } else {
+                    metricSel.value = '__count__';
+                }
+            }
+            if (typeSel) {
+                typeSel.value = savedSpec.type || currentCfg.type || (slot === 'chart1' ? 'bar' : 'doughnut');
+            }
+            if (aggSel) {
+                aggSel.value = savedSpec.agg || 'sum';
+            }
+
+            const onBuilderChange = () => {
+                if (!dimSel || !dimSel.value) return;
+                activeChartOverrides[slot] = {
+                    type: typeSel ? typeSel.value : 'bar',
+                    dim: dimSel.value,
+                    metric: metricSel ? metricSel.value : '__count__',
+                    agg: aggSel ? aggSel.value : 'sum',
+                };
+                runInteractiveQuery();
+            };
+
+            [typeSel, dimSel, metricSel, aggSel].forEach(sel => {
+                if (sel) sel.onchange = onBuilderChange;
+            });
+        });
+    }
+
     // --- Dynamic KPI Rendering ---
     function renderKpis(kpis) {
         const kpiGrid = document.getElementById('kpiGrid');
@@ -947,12 +1397,180 @@ document.addEventListener('DOMContentLoaded', () => {
         kpis.forEach(k => {
             const card = document.createElement('div');
             card.className = `kpi-card ${k.theme || ''}`;
+            const deltaHtml = k.delta_text
+                ? `<div class="kpi-delta delta-${escapeHtml(k.delta_dir || 'flat')}">${k.delta_dir === 'up' ? '▲' : (k.delta_dir === 'down' ? '▼' : '•')} ${escapeHtml(k.delta_text)}</div>`
+                : '';
             card.innerHTML = `
                 <div class="kpi-label">${escapeHtml(k.label)}</div>
                 <div class="kpi-value">${escapeHtml(k.value)}</div>
+                ${deltaHtml}
                 <div class="kpi-subtext">${escapeHtml(k.sub || '')}</div>
             `;
             kpiGrid.appendChild(card);
+        });
+    }
+
+    // --- Phase 3: Persistent My Reports Gallery & MoM Refresh ---
+    async function loadSavedReports() {
+        if (!myReportsSection || !myReportsGrid || !isAuthenticated) return;
+        try {
+            const res = await fetch('/api/reports');
+            if (!res.ok) return;
+            const json = await res.json();
+            const reports = json.reports || [];
+            myReportsGrid.innerHTML = '';
+            if (!reports.length) {
+                myReportsSection.style.display = 'none';
+                return;
+            }
+            myReportsSection.style.display = 'block';
+            reports.forEach(r => {
+                const card = document.createElement('div');
+                card.className = 'saved-report-card';
+                const topKpi = (r.latest_kpis && r.latest_kpis[0])
+                    ? `${escapeHtml(r.latest_kpis[0].label)}: <strong>${escapeHtml(r.latest_kpis[0].value)}</strong>`
+                    : '';
+                const domIcon = (r.domain && r.domain.icon) || '📊';
+                const domLbl = (r.domain && r.domain.label) || '';
+                card.innerHTML = `
+                    <div class="sr-head">
+                        <span class="sr-title">${domIcon} ${escapeHtml(r.title)}</span>
+                        <span class="sr-snaps">${escapeHtml(t('snaps_count', { n: r.snapshot_count || 1 }))}</span>
+                    </div>
+                    <div class="sr-meta">${escapeHtml(domLbl)}${r.latest_period ? ' · ' + escapeHtml(r.latest_period) : ''}</div>
+                    <div class="sr-kpi">${topKpi}</div>
+                    <div class="sr-actions">
+                        <button type="button" class="btn btn-primary sr-open" style="padding: 5px 10px; font-size: 11.5px;">${escapeHtml(t('btn_open_report'))}</button>
+                        <button type="button" class="btn btn-secondary sr-refresh" style="padding: 5px 10px; font-size: 11.5px;">${escapeHtml(t('btn_refresh_report'))}</button>
+                        <button type="button" class="btn btn-danger-outline sr-del" style="padding: 5px 9px; font-size: 11.5px;">🗑</button>
+                    </div>
+                `;
+                card.querySelector('.sr-open').onclick = () => openSavedReport(r.report_id);
+                card.querySelector('.sr-refresh').onclick = () => triggerReportRefresh(r.report_id, r.is_live_url);
+                card.querySelector('.sr-del').onclick = () => deleteSavedReport(r.report_id);
+                myReportsGrid.appendChild(card);
+            });
+        } catch (_) {}
+    }
+
+    async function openSavedReport(reportId) {
+        showLoading(t('loading_title'));
+        try {
+            const res = await fetch(`/api/reports/${encodeURIComponent(reportId)}`);
+            const json = await res.json();
+            if (json.success) {
+                renderResults(json);
+            } else {
+                alert(json.error || t('err_analysis_default'));
+            }
+        } catch (e) {
+            alert(t('err_server') + e.message);
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function triggerReportRefresh(reportId, isLive) {
+        if (!reportId) return;
+        if (isLive) {
+            refreshReportFromServer(reportId, null);
+            return;
+        }
+        pendingRefreshReportId = reportId;
+        if (refreshFileInput) {
+            refreshFileInput.value = '';
+            refreshFileInput.click();
+        }
+    }
+
+    async function refreshReportFromServer(reportId, fileObj) {
+        showLoading(t('loading_title'));
+        try {
+            let res;
+            if (fileObj) {
+                const fd = new FormData();
+                fd.append('file', fileObj);
+                res = await fetch(`/api/reports/${encodeURIComponent(reportId)}/refresh`, { method: 'POST', body: fd });
+            } else {
+                res = await fetch(`/api/reports/${encodeURIComponent(reportId)}/refresh`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ use_source_url: true })
+                });
+            }
+            const json = await res.json();
+            if (json.success) {
+                renderResults(json);
+                loadSavedReports();
+            } else {
+                alert(json.error || t('err_analysis_default'));
+            }
+        } catch (e) {
+            alert(t('err_server') + e.message);
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function deleteSavedReport(reportId) {
+        if (!confirm(t('confirm_delete_report'))) return;
+        try {
+            const res = await fetch(`/api/reports/${encodeURIComponent(reportId)}`, { method: 'DELETE' });
+            const json = await res.json();
+            if (json.success) {
+                if (currentReportId === reportId) currentReportId = null;
+                loadSavedReports();
+            }
+        } catch (_) {}
+    }
+
+    if (refreshFileInput) {
+        refreshFileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0 && pendingRefreshReportId) {
+                const f = e.target.files[0];
+                const rid = pendingRefreshReportId;
+                pendingRefreshReportId = null;
+                refreshReportFromServer(rid, f);
+            }
+        });
+    }
+
+    if (saveReportBtn) {
+        saveReportBtn.addEventListener('click', async () => {
+            if (!currentSessionId || !lastRenderedData) return;
+            const suggested = lastRenderedData.filename || 'AutoBI Report';
+            const title = prompt(t('prompt_report_title'), suggested);
+            if (title === null) return;
+            saveReportBtn.disabled = true;
+            try {
+                const res = await fetch('/api/reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: currentSessionId, title: title.trim() || suggested })
+                });
+                const json = await res.json();
+                if (json.success && json.report) {
+                    currentReportId = json.report.report_id;
+                    lastRenderedData.report_meta = json.report;
+                    saveReportBtn.textContent = t('btn_report_saved');
+                    if (refreshReportBtn) refreshReportBtn.style.display = 'inline-flex';
+                    loadSavedReports();
+                } else {
+                    alert(json.error || 'Could not save report.');
+                    saveReportBtn.disabled = false;
+                }
+            } catch (e) {
+                alert(t('err_server') + e.message);
+                saveReportBtn.disabled = false;
+            }
+        });
+    }
+
+    if (refreshReportBtn) {
+        refreshReportBtn.addEventListener('click', () => {
+            if (currentReportId) {
+                triggerReportRefresh(currentReportId, Boolean(lastRenderedData && lastRenderedData.is_live_url));
+            }
         });
     }
 

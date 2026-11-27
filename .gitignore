@@ -29,6 +29,7 @@ coolctl_config.json
 *.md
 **/*.md
 !README.md
+pitch.md
 
 .sessions/
 *.db

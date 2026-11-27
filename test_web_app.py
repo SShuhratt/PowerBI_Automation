@@ -86,7 +86,26 @@ def test_index_route():
     redir_res = client.get("/?demo=sales")
     assert redir_res.status_code == 302
     assert "/studio?demo=sales" in (redir_res.headers.get("Location") or "")
-    print("[PASS] test_index_route (3D landing on /, /studio workspace & dual dark/light theme)")
+
+    # Landing page Phase 1: zero-login live demo sandbox & pricing tiers
+    assert b"publicDemoChart1" in res.data
+    assert b"pricing" in res.data
+    assert b"$19" in res.data and b"$59" in res.data
+
+    # Public read-only demo API works without authentication and blocks invalid domains
+    pub_sales = client.get("/api/public-demo/sales")
+    assert pub_sales.status_code == 200
+    pub_json = pub_sales.get_json()
+    assert pub_json["success"] is True
+    assert len(pub_json["kpis"]) >= 3
+    assert "chart1" in pub_json["charts"]
+
+    pub_fin = client.get("/api/public-demo/finance")
+    assert pub_fin.status_code == 200
+    assert pub_fin.get_json()["domain"]["key"] == "finance"
+
+    assert client.get("/api/public-demo/invalid_domain").status_code == 400
+    print("[PASS] test_index_route (3D landing, zero-login demo sandbox, pricing & /studio workspace)")
 
 
 def test_brand_assets():
@@ -978,6 +997,323 @@ def test_custom_generic_schema_and_sticky_header():
     print("[PASS] test_custom_generic_schema_and_sticky_header (Custom dataset BI pipeline, clean labels & persistent sticky header)")
 
 
+def test_interactive_chart_builder_and_slicers():
+    """Verify server-side slicers and customizable chart aggregations via /api/session/<id>/query."""
+    client = app.test_client()
+    sample_res = client.post("/api/sample", json={"domain": "sales"}, headers=AUTH_HEADERS)
+    assert sample_res.status_code == 200
+    s_data = sample_res.get_json()
+    sid = s_data["session_id"]
+
+    # Interactive schema exposed cleanly
+    schema = s_data.get("interactive_schema") or {}
+    assert len(schema.get("numeric_cols", [])) >= 1
+    assert len(schema.get("dimension_cols", [])) >= 1
+
+    # Unauthenticated query blocked
+    assert client.post(f"/api/session/{sid}/query", json={}).status_code == 401
+
+    # Filter by category + override chart1 & chart2
+    first_cat = schema["slicers"][0]["values"][0] if schema.get("slicers") else None
+    slicer_col = schema["slicers"][0]["key"] if schema.get("slicers") else None
+    filters = {slicer_col: first_cat} if slicer_col else {}
+
+    q_res = client.post(
+        f"/api/session/{sid}/query",
+        json={
+            "filters": filters,
+            "chart_overrides": {
+                "chart1": {"type": "line", "dim": "region", "metric": "total_revenue", "agg": "avg"},
+                "chart2": {"type": "bar", "dim": "status", "metric": "__count__", "agg": "count"},
+            },
+            "save": True,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert q_res.status_code == 200
+    q_json = q_res.get_json()
+    assert q_json["success"] is True
+    assert q_json["charts"]["chart1"]["type"] == "line"
+    assert "Average Total Revenue" in q_json["charts"]["chart1"]["title"]
+    assert q_json["charts"]["chart2"]["type"] == "bar"
+    assert q_json["row_count"] <= q_json["total_row_count"]
+
+    # Invalid column safely rejected with 400
+    bad_res = client.post(
+        f"/api/session/{sid}/query",
+        json={"chart_overrides": {"chart1": {"type": "bar", "dim": "no_such_col", "metric": "total_revenue", "agg": "sum"}}},
+        headers=AUTH_HEADERS,
+    )
+    assert bad_res.status_code == 400
+
+    # Customized charts persist into HTML executive preview
+    prev_res = client.get(f"/api/preview/{sid}")
+    assert prev_res.status_code == 200
+    assert b"Average Total Revenue" in prev_res.data
+    client.post(f"/api/purge/{sid}", headers=AUTH_HEADERS)
+    print("[PASS] test_interactive_chart_builder_and_slicers (Full-dataset filters & Chart Builder overrides)")
+
+
+def test_saved_reports_and_mom_refresh():
+    """Verify AES-256-GCM encrypted Saved Reports gallery, strict owner isolation, and MoM deltas on refresh."""
+    import sqlite3
+    import uuid
+    from reports_store import reports_store
+
+    client_a = app.test_client()
+    client_b = app.test_client()
+
+    # Register two separate isolated users
+    email_a = f"owner_a_{uuid.uuid4().hex[:6]}@enterprise.local"
+    email_b = f"owner_b_{uuid.uuid4().hex[:6]}@enterprise.local"
+    assert client_a.post("/api/auth/register", json={"full_name": "Owner A", "email": email_a, "password": "Password123!"}).status_code == 200
+    assert client_b.post("/api/auth/register", json={"full_name": "Owner B", "email": email_b, "password": "Password123!"}).status_code == 200
+
+    # User A uploads Period 1 sales CSV
+    csv_jan = (
+        "order_id,order_date,region,category,units_sold,unit_price,total_revenue,status\n"
+        "101,2026-01-05,Tashkent,Electronics,10,100.0,,Completed\n"
+        "102,2026-01-12,Samarkand,Furniture,5,200.0,,Completed\n"
+    )
+    up_res = client_a.post("/api/upload", data={"file": (io.BytesIO(csv_jan.encode()), "jan_sales.csv")}, content_type="multipart/form-data")
+    assert up_res.status_code == 200
+    sid = up_res.get_json()["session_id"]
+
+    # Save report
+    save_res = client_a.post("/api/reports", json={"session_id": sid, "title": "Monthly Secret Retail", "period_label": "2026-01"})
+    assert save_res.status_code == 201
+    rid = save_res.get_json()["report"]["report_id"]
+
+    # Verify AES-256-GCM encryption at rest in reports.db (no plaintext title or data)
+    with sqlite3.connect(reports_store.db_path) as conn:
+        row = conn.execute("SELECT encrypted_meta FROM saved_reports WHERE report_id = ?;", (rid,)).fetchone()
+    assert row is not None
+    assert row[0].startswith("enc:v1:")
+    assert "Monthly Secret Retail" not in row[0]
+
+    # Cross-user isolation: User B cannot list, open, refresh, or delete User A's report
+    assert not any(r["report_id"] == rid for r in client_b.get("/api/reports").get_json()["reports"])
+    assert client_b.get(f"/api/reports/{rid}").status_code == 404
+    assert client_b.delete(f"/api/reports/{rid}").status_code == 404
+
+    # User A refreshes with Period 2 CSV (+50% higher revenue) -> MoM delta computed
+    csv_feb = (
+        "order_id,order_date,region,category,units_sold,unit_price,total_revenue,status\n"
+        "201,2026-02-05,Tashkent,Electronics,15,100.0,,Completed\n"
+        "202,2026-02-12,Samarkand,Furniture,7.5,200.0,,Completed\n"
+    )
+    ref_res = client_a.post(
+        f"/api/reports/{rid}/refresh",
+        data={"file": (io.BytesIO(csv_feb.encode()), "feb_sales.csv"), "period_label": "2026-02"},
+        content_type="multipart/form-data",
+    )
+    assert ref_res.status_code == 200
+    ref_json = ref_res.get_json()
+    rev_kpi = [k for k in ref_json["kpis"] if "Revenue" in k["label"]][0]
+    assert rev_kpi["delta_dir"] == "up"
+    assert "+50.0%" in rev_kpi["delta_text"]
+
+    # Reopen saved report -> hydrates download-ready session
+    open_res = client_a.get(f"/api/reports/{rid}")
+    assert open_res.status_code == 200
+    open_json = open_res.get_json()
+    assert len(open_json["snapshot_history"]) == 2
+    assert client_a.get(f"/api/download/{open_json['session_id']}").status_code == 200
+
+    # Delete report permanently
+    assert client_a.delete(f"/api/reports/{rid}").status_code == 200
+    assert client_a.get(f"/api/reports/{rid}").status_code == 404
+    print("[PASS] test_saved_reports_and_mom_refresh (Encrypted gallery, owner isolation & MoM deltas)")
+
+
+def test_scheduled_telegram_digests():
+    """Verify encrypted digest scheduling, multi-worker lease lock, anomaly-only gating & test-run."""
+    import sqlite3
+    import time
+    from unittest.mock import patch
+    from scheduler_service import scheduler_service
+
+    client = app.test_client()
+    # Upload dataset with a negative profit anomaly so anomaly check triggers cleanly
+    csv_anom = (
+        "account_id,account_name,category,revenue,expenses,profit\n"
+        "GL-1,Retail Store,Sales,1000,1500,-500\n"
+        "GL-2,Online Store,Sales,5000,2000,3000\n"
+    )
+    up = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(csv_anom.encode()), "sched_fin.csv")},
+        content_type="multipart/form-data",
+        headers=AUTH_HEADERS,
+    )
+    assert up.status_code == 200
+    sid = up.get_json()["session_id"]
+
+    rep_res = client.post("/api/reports", json={"session_id": sid, "title": "Weekly CFO Finance"}, headers=AUTH_HEADERS)
+    assert rep_res.status_code == 201
+    rid = rep_res.get_json()["report"]["report_id"]
+
+    # Create encrypted schedule
+    sc_res = client.post(
+        f"/api/reports/{rid}/schedule",
+        json={"cadence": "daily", "hour_utc": 4, "targets": ["@cfo_alerts"], "alert_only_on_anomalies": True, "enabled": True},
+        headers=AUTH_HEADERS,
+    )
+    assert sc_res.status_code == 200
+    assert sc_res.get_json()["schedule"]["cadence"] == "daily"
+
+    # Raw schedule config is encrypted at rest
+    with sqlite3.connect(scheduler_service.db_path) as conn:
+        srow = conn.execute("SELECT encrypted_config FROM report_schedules WHERE report_id = ?;", (rid,)).fetchone()
+    assert srow and srow[0].startswith("enc:v1:")
+    assert "@cfo_alerts" not in srow[0]
+
+    # Lease lock stops concurrent multi-worker double execution
+    assert scheduler_service.acquire_lease("test_tick_lock", "worker-1", ttl_seconds=30) is True
+    assert scheduler_service.acquire_lease("test_tick_lock", "worker-2", ttl_seconds=30) is False
+    scheduler_service.release_lease("test_tick_lock", "worker-1")
+
+    # Run due schedule via mocked Telegram dispatcher
+    with patch("telegram_client.dispatch_executive_report", return_value={"success": True, "dispatched_count": 1}) as mock_disp:
+        # Force schedule due immediately and execute tick
+        scheduler_service.upsert_schedule(
+            owner_email="api-client@autobi.local",
+            report_id=rid,
+            cadence="daily",
+            targets=["@cfo_alerts"],
+            alert_only_on_anomalies=True,
+            next_run_at=time.time() - 5,
+        )
+        from web_app import _execute_scheduled_refresh_job, _dispatch_telegram_job
+        tick = scheduler_service.run_due_schedules(_execute_scheduled_refresh_job, _dispatch_telegram_job)
+        assert tick["acquired"] is True
+        assert tick["executed"] >= 1
+        assert mock_disp.called
+
+        # Next tick should NOT fire again because next_run_at moved to tomorrow
+        mock_disp.reset_mock()
+        tick2 = scheduler_service.run_due_schedules(_execute_scheduled_refresh_job, _dispatch_telegram_job)
+        assert tick2["executed"] == 0
+        assert not mock_disp.called
+
+    # Clean up
+    assert client.delete(f"/api/reports/{rid}", headers=AUTH_HEADERS).status_code == 200
+    print("[PASS] test_scheduled_telegram_digests (Encrypted schedules, lease lock, anomaly gating & Telegram dispatch)")
+
+
+def test_regional_presets_and_sql_connector():
+    """Verify amoCRM/Bitrix24, Uzum Market, Payme/Click export enrichment and Read-Only SQL connector security."""
+    import sqlite3
+    from unittest.mock import patch
+    from sql_connector import validate_select_only_sql, validate_db_uri_safe, mask_db_uri
+
+    client = app.test_client()
+
+    # 1. amoCRM / Bitrix24 Russian deal export
+    crm_csv = (
+        "ID сделки,Этап сделки,Ответственный,Бюджет,Дата создания\n"
+        "D-1,Успешно реализовано,Sardorbek,4500,2026-11-01\n"
+        "D-2,Переговоры,Madina,2800,2026-11-03\n"
+        "D-3,Отказ клиента,Timur,1200,2026-11-05\n"
+    )
+    crm_res = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(crm_csv.encode("utf-8")), "amocrm_deals.csv")},
+        content_type="multipart/form-data",
+        headers=AUTH_HEADERS,
+    )
+    assert crm_res.status_code == 200
+    crm_json = crm_res.get_json()
+    assert (crm_json.get("regional_preset") or {}).get("key") == "amocrm_bitrix"
+    assert crm_json["domain"]["key"] == "sales"
+    assert any(k["label"] == "Cancellation Rate" for k in crm_json["kpis"])
+
+    # 2. Uzum Market Seller export -> net_payout computed cleanly
+    uzum_csv = (
+        "Артикул,Товар,Комиссия,Логистика,Выручка\n"
+        "SKU-10,Headphones,150,50,1000\n"
+        "SKU-11,Keyboard,90,30,600\n"
+    )
+    uzum_res = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(uzum_csv.encode("utf-8")), "uzum_seller.csv")},
+        content_type="multipart/form-data",
+        headers=AUTH_HEADERS,
+    )
+    assert uzum_res.status_code == 200
+    uzum_json = uzum_res.get_json()
+    assert (uzum_json.get("regional_preset") or {}).get("key") == "uzum_market"
+    assert uzum_json["table_records"][0]["net_payout"] == 800.0
+
+    # 3. Payme / Click Merchant statement -> net_amount + duplicate tx flag
+    payme_csv = (
+        "transaction_id,payment_method,сумма,комиссия\n"
+        "TX-5001,Payme,500000,10000\n"
+        "TX-5001,Payme,500000,10000\n"
+        "TX-5002,Click,250000,5000\n"
+    )
+    payme_res = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(payme_csv.encode("utf-8")), "payme_statement.csv")},
+        content_type="multipart/form-data",
+        headers=AUTH_HEADERS,
+    )
+    assert payme_res.status_code == 200
+    payme_json = payme_res.get_json()
+    assert (payme_json.get("regional_preset") or {}).get("key") == "payme_click"
+    assert payme_json["table_records"][0]["net_amount"] == 490000.0
+    assert any(a["category"] == "duplicate_invoices" for a in payme_json["anomalies"])
+
+    # 4. SQL Connector static & SSRF security checks
+    for bad_sql in ["DROP TABLE users", "DELETE FROM orders WHERE 1=1", "SELECT 1; DROP TABLE x", "UPDATE sales SET a=1"]:
+        try:
+            validate_select_only_sql(bad_sql)
+            raise AssertionError(f"Expected blocked SQL for {bad_sql}")
+        except ValueError:
+            pass
+
+    for bad_uri in [
+        "sqlite:///D:/secret.db",
+        "postgresql://user:pass@169.254.169.254:5432/meta",
+        "postgresql://user:pass@127.0.0.1:5432/localdb",
+        "mysql://user:pass@localhost:3306/localdb",
+    ]:
+        try:
+            validate_db_uri_safe(bad_uri)
+            raise AssertionError(f"Expected blocked URI for {bad_uri}")
+        except ValueError:
+            pass
+
+    assert mask_db_uri("postgresql://analyst:supersecret99@db.example.com:5432/prod_sales") == "postgresql://db.example.com:5432/prod_sales"
+
+    # Unauthenticated request blocked (401); blocked SQL over HTTP rejected (400)
+    assert client.post("/api/ingest-sql", json={"uri": "postgresql://u:p@db.example.com:5432/db", "query": "SELECT 1"}).status_code == 401
+    assert client.post("/api/ingest-sql", json={"uri": "postgresql://u:p@db.example.com:5432/db", "query": "DROP TABLE x"}, headers=AUTH_HEADERS).status_code == 400
+    assert client.post("/api/ingest-sql", json={"uri": "postgresql://u:p@169.254.169.254:5432/db", "query": "SELECT 1"}, headers=AUTH_HEADERS).status_code == 400
+
+    # Mocked PostgreSQL ingestion succeeds and never leaks password
+    import pandas as pd
+    mock_df = pd.DataFrame([
+        {"order_id": 1, "order_date": "2026-11-01", "category": "Tech", "units_sold": 3, "unit_price": 200.0, "status": "Completed"},
+        {"order_id": 2, "order_date": "2026-11-02", "category": "Tech", "units_sold": 2, "unit_price": 150.0, "status": "Completed"},
+    ])
+    with patch("web_app.fetch_readonly_sql_df", return_value=(mock_df, "postgresql://db.example.com:5432/prod_sales")):
+        sql_res = client.post(
+            "/api/ingest-sql",
+            json={"uri": "postgresql://analyst:supersecret99@db.example.com:5432/prod_sales", "query": "SELECT * FROM orders LIMIT 10"},
+            headers=AUTH_HEADERS,
+        )
+        assert sql_res.status_code == 200
+        sql_text = sql_res.data.decode("utf-8")
+        assert "supersecret99" not in sql_text
+        assert sql_res.get_json()["filename"] == "postgresql://db.example.com:5432/prod_sales"
+
+    # CRM & Uzum demo endpoints run cleanly
+    assert client.post("/api/sample", json={"domain": "crm"}, headers=AUTH_HEADERS).status_code == 200
+    assert client.post("/api/sample", json={"domain": "uzum"}, headers=AUTH_HEADERS).status_code == 200
+    print("[PASS] test_regional_presets_and_sql_connector (amoCRM/Bitrix24, Uzum, Payme/Click & Read-Only SQL security)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -985,6 +1321,10 @@ if __name__ == "__main__":
     test_legal_pages()
     test_encrypted_user_vault_and_registration()
     test_custom_generic_schema_and_sticky_header()
+    test_interactive_chart_builder_and_slicers()
+    test_saved_reports_and_mom_refresh()
+    test_scheduled_telegram_digests()
+    test_regional_presets_and_sql_connector()
     test_api_sample()
     test_api_upload_csv()
     test_session_persistence()

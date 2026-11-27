@@ -118,10 +118,10 @@ class PowerBIModelGenerator:
             measures.extend(self._generate_generic_measures(cols))
 
         # Check if a date column exists to generate Time Intelligence measures
+        primary_name = None
+        primary_format = "$#,##0.00"
         date_col = self.find_date_col()
         if date_col:
-            primary_name = None
-            primary_format = "$#,##0.00"
             for m in measures:
                 if any(k in m["name"] for k in ["Revenue", "Sales", "Spend", "Conversions", "Headcount", "Payroll", "Units", "Value", "Income"]):
                     primary_name = m["name"]

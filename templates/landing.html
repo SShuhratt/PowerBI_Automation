@@ -15,6 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -34,6 +35,8 @@
                 <nav class="header-nav-links" aria-label="Primary navigation">
                     <a href="#pipeline" class="nav-anchor-link" data-i18n="nav_pipeline">ETL Pipeline</a>
                     <a href="#domains" class="nav-anchor-link" data-i18n="nav_domains">Domains</a>
+                    <a href="#live-demo" class="nav-anchor-link" data-i18n="nav_live_demo">Live Demo</a>
+                    <a href="#pricing" class="nav-anchor-link" data-i18n="nav_pricing">Pricing</a>
                 </nav>
 
                 <button type="button" id="themeToggleBtn" class="theme-toggle-btn" aria-label="Switch theme">
@@ -351,6 +354,139 @@
                         </a>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- Interactive Zero-Login Sample Sandbox -->
+        <section id="live-demo" class="landing-section">
+            <div class="section-header-center">
+                <span class="section-eyebrow" data-i18n="land_demo_tag">ZERO-LOGIN LIVE SANDBOX</span>
+                <h2 class="section-title" data-i18n="land_demo_title">Inspect Real Cleaned KPIs &amp; Charts Before Signing Up</h2>
+                <p class="section-sub" data-i18n="land_demo_sub">Switch datasets below to test AutoBI’s deterministic cleaning, CBU.uz FX normalization, and live Chart.js BI telemetry right on this page.</p>
+            </div>
+
+            <div class="public-demo-card">
+                <div class="domain-showcase-tabs public-demo-tabs" role="group" aria-label="Live sample dataset switcher">
+                    <button type="button" class="public-demo-tab active" data-demo-domain="sales" aria-pressed="true" data-i18n="opt_sales">🛍️ Sales &amp; Orders</button>
+                    <button type="button" class="public-demo-tab" data-demo-domain="finance" aria-pressed="false" data-i18n="opt_finance">💳 Finance &amp; Accounting</button>
+                    <button type="button" class="public-demo-tab" data-demo-domain="inventory" aria-pressed="false" data-i18n="opt_inventory">📦 Inventory &amp; Supply</button>
+                    <button type="button" class="public-demo-tab" data-demo-domain="generic" aria-pressed="false" data-i18n="opt_generic">🧩 Custom / Any Data</button>
+                </div>
+
+                <div class="demo-audit-pills" id="publicDemoPills">
+                    <span class="demo-pill" id="demoPillRows">Loading rows...</span>
+                    <span class="demo-pill" id="demoPillHealed">Self-healing audit</span>
+                    <span class="demo-pill" id="demoPillAnom">Anomaly check</span>
+                    <span class="demo-pill" id="demoPillFx">CBU FX check</span>
+                </div>
+
+                <div class="demo-kpi-strip" id="publicDemoKpis"></div>
+
+                <div class="demo-split-grid">
+                    <div class="demo-chart-box">
+                        <div class="demo-box-header">
+                            <h3 id="publicDemoChart1Title">Primary Breakdown</h3>
+                        </div>
+                        <div class="demo-canvas-wrap">
+                            <canvas id="publicDemoChart1"></canvas>
+                        </div>
+                    </div>
+                    <div class="demo-chart-box">
+                        <div class="demo-box-header">
+                            <h3 id="publicDemoChart2Title">Distribution</h3>
+                        </div>
+                        <div class="demo-canvas-wrap">
+                            <canvas id="publicDemoChart2"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="demo-action-footer">
+                    <span class="demo-footer-note" data-i18n="land_demo_footer">Export includes cleaned_data.csv, LoadData.m, DAX measures, and a native .pbip Power BI project.</span>
+                    <a id="publicDemoStudioLink" href="{{ url_for('studio', demo='sales') }}" class="btn btn-primary" data-i18n="land_demo_open_btn">
+                        Open Full Pack &amp; .PBIP Export in Studio →
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Transparent SaaS Pricing Tiers -->
+        <section id="pricing" class="landing-section">
+            <div class="section-header-center">
+                <span class="section-eyebrow" data-i18n="price_tag">SIMPLE, TRANSPARENT PRICING</span>
+                <h2 class="section-title" data-i18n="price_title">Built for Founders, Analysts &amp; Growing Teams</h2>
+                <p class="section-sub" data-i18n="price_sub">Start free with instant Power BI (.pbip) generation, then upgrade when you need recurring snapshots, interactive slicers, and automated Telegram briefings.</p>
+            </div>
+
+            <div class="pricing-toggle-bar">
+                <div class="pricing-pill-group" role="group" aria-label="Billing interval">
+                    <button type="button" class="price-mode-btn active" data-billing="monthly" data-i18n="price_monthly">Monthly</button>
+                    <button type="button" class="price-mode-btn" data-billing="annual" data-i18n="price_annual">Annual (-20%)</button>
+                </div>
+                <div class="pricing-pill-group" role="group" aria-label="Display currency">
+                    <button type="button" class="price-curr-btn active" data-currency="USD">USD ($)</button>
+                    <button type="button" class="price-curr-btn" data-currency="UZS">UZS (so‘m)</button>
+                </div>
+            </div>
+
+            <div class="pricing-grid">
+                <!-- Starter -->
+                <article class="pricing-card">
+                    <div class="pricing-tier-head">
+                        <h3 data-i18n="tier1_name">Starter</h3>
+                        <p data-i18n="tier1_desc">Instant spreadsheet cleanup and native Power BI exports.</p>
+                    </div>
+                    <div class="pricing-price-row">
+                        <span class="pricing-amount" data-usd-monthly="0" data-usd-annual="0">$0</span>
+                        <span class="pricing-period" data-i18n="price_forever">/ free forever</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li data-i18n="tier1_f1">✓ Upload Excel, CSV, CP1251 &amp; 1C matrices</li>
+                        <li data-i18n="tier1_f2">✓ Auto domain detection + any custom schema</li>
+                        <li data-i18n="tier1_f3">✓ Clean CSV, LoadData.m, DAX &amp; .pbip export</li>
+                        <li data-i18n="tier1_f4">✓ 2-hour zero-persistence encrypted cache</li>
+                    </ul>
+                    <a href="{{ url_for('studio') }}" class="btn btn-secondary pricing-cta" data-i18n="tier1_cta">Start Free in Studio →</a>
+                </article>
+
+                <!-- Pro -->
+                <article class="pricing-card featured">
+                    <div class="pricing-badge" data-i18n="tier2_badge">MOST POPULAR</div>
+                    <div class="pricing-tier-head">
+                        <h3 data-i18n="tier2_name">Pro</h3>
+                        <p data-i18n="tier2_desc">Interactive BI exploration &amp; monthly report tracking.</p>
+                    </div>
+                    <div class="pricing-price-row">
+                        <span class="pricing-amount" data-usd-monthly="19" data-usd-annual="15">$19</span>
+                        <span class="pricing-period" data-i18n="price_per_mo">/ month</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li data-i18n="tier2_f1">✓ Everything in Starter + CBU.uz FX &amp; CFO audits</li>
+                        <li data-i18n="tier2_f2">✓ Interactive chart builder &amp; top-bar slicers</li>
+                        <li data-i18n="tier2_f3">✓ Encrypted My Reports gallery &amp; MoM deltas</li>
+                        <li data-i18n="tier2_f4">✓ Live Google Sheets + amoCRM/Bitrix24 &amp; Uzum presets</li>
+                    </ul>
+                    <a href="{{ url_for('studio') }}" class="btn btn-primary pricing-cta" data-i18n="tier2_cta">Launch Pro Workspace →</a>
+                </article>
+
+                <!-- Business -->
+                <article class="pricing-card">
+                    <div class="pricing-tier-head">
+                        <h3 data-i18n="tier3_name">Business</h3>
+                        <p data-i18n="tier3_desc">Hands-free executive reporting &amp; live DB pipelines.</p>
+                    </div>
+                    <div class="pricing-price-row">
+                        <span class="pricing-amount" data-usd-monthly="59" data-usd-annual="47">$59</span>
+                        <span class="pricing-period" data-i18n="price_per_mo">/ month</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li data-i18n="tier3_f1">✓ Everything in Pro for multi-department teams</li>
+                        <li data-i18n="tier3_f2">✓ Scheduled daily/weekly Telegram executive digests</li>
+                        <li data-i18n="tier3_f3">✓ Read-only PostgreSQL &amp; MySQL SQL connector</li>
+                        <li data-i18n="tier3_f4">✓ Priority onboarding &amp; custom DAX templates</li>
+                    </ul>
+                    <a href="{{ url_for('studio') }}" class="btn btn-emerald pricing-cta" data-i18n="tier3_cta">Request Business Access →</a>
+                </article>
             </div>
         </section>
 

@@ -81,12 +81,15 @@
         <!-- Upload Card -->
         <div id="uploadCard" class="upload-card">
             <!-- Ingestion Mode Tabs -->
-            <div class="upload-mode-tabs" style="display: flex; gap: 8px; margin-bottom: 20px;">
+            <div class="upload-mode-tabs" style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
                 <button type="button" id="tabModeFile" class="tab-btn active" style="padding: 8px 16px; font-size: 13px;" data-i18n="mode_file">
                     📁 Upload File (.xlsx, .csv)
                 </button>
                 <button type="button" id="tabModeGSheets" class="tab-btn" style="padding: 8px 16px; font-size: 13px;" data-i18n="mode_gsheets">
                     🌐 Google Sheets (Live Refresh)
+                </button>
+                <button type="button" id="tabModeSql" class="tab-btn" style="padding: 8px 16px; font-size: 13px;" data-i18n="mode_sql">
+                    🗄️ Database (Read-Only SQL)
                 </button>
             </div>
 
@@ -123,6 +126,25 @@
                 </div>
             </div>
 
+            <!-- Read-Only SQL Database Form (Hidden by default) -->
+            <div id="sqlSection" class="gsheets-panel" style="display: none;">
+                <div style="font-size: 32px; margin-bottom: 12px;">🗄️</div>
+                <h3 data-i18n="sql_title">Connect Read-Only PostgreSQL or MySQL</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px; max-width: 560px; margin-left: auto; margin-right: auto;" data-i18n="sql_sub">
+                    Run a read-only SELECT query (max 50,000 rows, 10s timeout). AutoBI never stores raw database credentials in audit logs.
+                </p>
+                <form id="sqlForm" novalidate style="display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 0 auto; text-align: left;">
+                    <input type="text" id="sqlUriInput" class="gsheets-input" placeholder="postgresql://readonly_user:password@db.company.com:5432/analytics" data-i18n-placeholder="sql_uri_placeholder" required>
+                    <textarea id="sqlQueryInput" rows="3" class="gsheets-input" style="font-family: var(--font-mono); font-size: 12.5px; resize: vertical;" placeholder="SELECT order_date, region, category, units_sold, unit_price FROM orders LIMIT 5000" data-i18n-placeholder="sql_query_placeholder" required></textarea>
+                    <button type="submit" id="sqlSubmitBtn" class="btn btn-primary" style="padding: 11px 22px; align-self: flex-end;" data-i18n="sql_submit">
+                        ⚡ Execute Read-Only Query &amp; Model
+                    </button>
+                </form>
+                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 12px;" data-i18n="sql_hint">
+                    🔒 Enforced read-only transaction: INSERT, UPDATE, DELETE, DROP, and metadata host connections are strictly blocked.
+                </div>
+            </div>
+
             <!-- Multi-Domain Demo Presets -->
             <div class="demo-presets-container">
                 <span class="demo-presets-title" data-i18n="demo_presets_title">Or test with multi-domain demo presets:</span>
@@ -131,9 +153,23 @@
                     <button type="button" class="demo-pill-btn" data-domain="marketing" data-i18n="demo_marketing">📣 Marketing & Paid Media</button>
                     <button type="button" class="demo-pill-btn" data-domain="hr" data-i18n="demo_hr">👥 HR & People Ops</button>
                     <button type="button" class="demo-pill-btn" data-domain="inventory" data-i18n="demo_inventory">📦 Inventory & Supply Chain</button>
+                    <button type="button" class="demo-pill-btn" data-domain="crm" data-i18n="demo_crm">🤝 amoCRM / Bitrix24 Deals</button>
+                    <button type="button" class="demo-pill-btn" data-domain="uzum" data-i18n="demo_uzum">🛒 Uzum / Payme Export</button>
                     <button type="button" class="demo-pill-btn" data-domain="generic" data-i18n="demo_generic">🧩 Custom Dataset (Any Schema)</button>
                 </div>
             </div>
+
+            <!-- Persistent Opt-In My Reports Gallery (Visible when authenticated & populated) -->
+            <div id="myReportsSection" class="my-reports-section" style="display: none;">
+                <div class="my-reports-head">
+                    <div>
+                        <h3 data-i18n="my_reports_title">📁 My Saved Reports</h3>
+                        <p data-i18n="my_reports_sub">AES-256-GCM encrypted workspaces with monthly snapshot history &amp; MoM deltas.</p>
+                    </div>
+                </div>
+                <div id="myReportsGrid" class="my-reports-grid"></div>
+            </div>
+            <input type="file" id="refreshFileInput" accept=".xlsx, .xls, .csv" style="display: none;">
 
             <div class="trust-footer">
                 <div class="trust-item">
@@ -208,6 +244,8 @@
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <button id="resetUploadBtn" class="btn btn-secondary" data-i18n="btn_upload_another">Upload Another</button>
+                    <button id="saveReportBtn" class="btn btn-secondary" data-i18n="btn_save_report">💾 Save Report</button>
+                    <button id="refreshReportBtn" class="btn btn-secondary" style="display: none;" data-i18n="btn_refresh_report">🔄 Refresh Period</button>
                     <a id="previewDashboardBtn" href="#" target="_blank" class="btn btn-primary" data-i18n="btn_exec_preview" data-i18n-title="btn_exec_preview_title" title="Open responsive executive dashboard in new browser tab">📊 Executive Preview</a>
                     <button id="downloadZipBtn" class="btn btn-emerald" data-i18n="btn_download_zip">📥 Download Power BI Starter Kit (.zip)</button>
                     <button id="sendTelegramBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #229ED9 0%, #1789c9 100%); border-color: #229ED9;" data-i18n="btn_send_telegram" data-i18n-title="btn_send_telegram_title" title="Dispatch executive digest and dashboard to Telegram">✈️ Send to Telegram</button>
@@ -236,6 +274,15 @@
                 <!-- Executive Anomaly Alert Banner -->
                 <div id="dashboardAlertBanner" class="dashboard-anomaly-banner"></div>
 
+                <!-- Top-Bar Interactive Slicers -->
+                <div id="slicerBar" class="slicer-bar" style="display: none;">
+                    <div id="slicerInputs" class="slicer-inputs"></div>
+                    <div class="slicer-meta">
+                        <span id="slicerCountBadge" class="slicer-count-pill"></span>
+                        <button type="button" id="resetSlicersBtn" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;" data-i18n="slicer_reset">Reset Filters</button>
+                    </div>
+                </div>
+
                 <!-- Dynamic KPI Grid -->
                 <div id="kpiGrid" class="kpi-grid">
                     <!-- Populated dynamically by app.js based on detected domain -->
@@ -244,13 +291,49 @@
                 <!-- Charts Grid -->
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <h3 id="chart1Title" data-i18n="chart1_default">Primary Metric Breakdown</h3>
+                        <div class="chart-card-head">
+                            <h3 id="chart1Title" data-i18n="chart1_default">Primary Metric Breakdown</h3>
+                            <button type="button" class="chart-customize-toggle" data-target="chart1Controls" data-i18n="chart_customize">Customize ⚙</button>
+                        </div>
+                        <div id="chart1Controls" class="chart-builder-bar" style="display: none;">
+                            <select class="cb-select cb-type" data-slot="chart1" aria-label="Chart 1 type">
+                                <option value="bar">Bar</option>
+                                <option value="line">Line</option>
+                                <option value="doughnut">Doughnut</option>
+                            </select>
+                            <select class="cb-select cb-dim" data-slot="chart1" aria-label="Chart 1 dimension"></select>
+                            <select class="cb-select cb-metric" data-slot="chart1" aria-label="Chart 1 metric"></select>
+                            <select class="cb-select cb-agg" data-slot="chart1" aria-label="Chart 1 aggregation">
+                                <option value="sum">Sum</option>
+                                <option value="avg">Avg</option>
+                                <option value="count">Count</option>
+                                <option value="max">Max</option>
+                            </select>
+                        </div>
                         <div style="position: relative; height: 260px;">
                             <canvas id="chart1Canvas"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h3 id="chart2Title" data-i18n="chart2_default">Distribution Breakdown</h3>
+                        <div class="chart-card-head">
+                            <h3 id="chart2Title" data-i18n="chart2_default">Distribution Breakdown</h3>
+                            <button type="button" class="chart-customize-toggle" data-target="chart2Controls" data-i18n="chart_customize">Customize ⚙</button>
+                        </div>
+                        <div id="chart2Controls" class="chart-builder-bar" style="display: none;">
+                            <select class="cb-select cb-type" data-slot="chart2" aria-label="Chart 2 type">
+                                <option value="doughnut">Doughnut</option>
+                                <option value="bar">Bar</option>
+                                <option value="line">Line</option>
+                            </select>
+                            <select class="cb-select cb-dim" data-slot="chart2" aria-label="Chart 2 dimension"></select>
+                            <select class="cb-select cb-metric" data-slot="chart2" aria-label="Chart 2 metric"></select>
+                            <select class="cb-select cb-agg" data-slot="chart2" aria-label="Chart 2 aggregation">
+                                <option value="sum">Sum</option>
+                                <option value="avg">Avg</option>
+                                <option value="count">Count</option>
+                                <option value="max">Max</option>
+                            </select>
+                        </div>
                         <div style="position: relative; height: 260px;">
                             <canvas id="chart2Canvas"></canvas>
                         </div>
@@ -424,6 +507,34 @@
                         <span class="auth-hint" data-i18n-html="tg_recipients_hint">
                             Accepts Telegram links (<code>https://t.me/my_channel</code>), <code>@channel_username</code>, or personal usernames. Separate multiple targets with commas or newlines.
                         </span>
+                    </div>
+
+                    <!-- Phase 4: Scheduled Auto-Digest Box -->
+                    <div id="tgScheduleBox" class="tg-schedule-box">
+                        <div class="tg-schedule-head">
+                            <span class="tg-schedule-title" data-i18n="tg_sched_title">⏰ Recurring Auto-Digest Schedule</span>
+                            <span id="tgScheduleBadge" class="tg-sched-pill" data-i18n="tg_sched_off">Not Scheduled</span>
+                        </div>
+                        <div class="tg-schedule-row">
+                            <select id="tgScheduleCadence" class="slicer-select" aria-label="Schedule frequency">
+                                <option value="weekly_mon" data-i18n="tg_cad_weekly">Every Monday</option>
+                                <option value="daily" data-i18n="tg_cad_daily">Every Day</option>
+                            </select>
+                            <select id="tgScheduleHour" class="slicer-select" aria-label="Schedule hour">
+                                <option value="4" data-i18n="tg_hr_09">09:00 Tashkent (04:00 UTC)</option>
+                                <option value="7" data-i18n="tg_hr_12">12:00 Tashkent (07:00 UTC)</option>
+                                <option value="13" data-i18n="tg_hr_18">18:00 Tashkent (13:00 UTC)</option>
+                            </select>
+                        </div>
+                        <label class="tg-sched-check">
+                            <input type="checkbox" id="tgAlertAnomaliesOnly">
+                            <span data-i18n="tg_sched_anom_only">Notify only when CFO anomalies are detected</span>
+                        </label>
+                        <div class="tg-sched-actions">
+                            <button type="button" id="tgSaveScheduleBtn" class="btn btn-secondary" style="padding: 6px 11px; font-size: 12px;" data-i18n="tg_sched_save">Save Schedule</button>
+                            <button type="button" id="tgTestRunScheduleBtn" class="btn btn-secondary" style="padding: 6px 11px; font-size: 12px;" data-i18n="tg_sched_run">Run Now</button>
+                            <button type="button" id="tgDeleteScheduleBtn" class="btn btn-danger-outline" style="display: none; padding: 6px 10px; font-size: 12px;" data-i18n="tg_sched_disable">Disable</button>
+                        </div>
                     </div>
 
                     <div id="telegramStatusMsg" class="auth-error-msg" style="display: none;"></div>

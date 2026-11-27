@@ -790,6 +790,10 @@ class SelfHealingCleaner:
                     df[col] = df[col].apply(lambda v: str(v).strip() if pd.notna(v) else np.nan)
                     self.audit_log["datatype_conversions"][str_col] = "string"
 
+        # 5.4 Regional CRM (amoCRM/Bitrix24) & Uzum / Payme Export Enrichment
+        from regional_presets import enrich_regional_preset
+        df = enrich_regional_preset(df, self.audit_log["display_labels"], self.audit_log)
+
         # 5.5 Multi-Currency & CBU.uz FX Normalization
         df = self._detect_and_normalize_currencies(df)
 

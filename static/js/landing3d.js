@@ -936,10 +936,227 @@
     requestAnimationFrame(draw);
   }
 
+  /* =========================================================
+     4. ZERO-LOGIN PUBLIC DEMO SANDBOX + PRICING SWITCHER
+     ========================================================= */
+  function initPublicDemoAndPricing() {
+    var demoTabs = document.querySelectorAll(".public-demo-tab[data-demo-domain]");
+    var kpiWrap = document.getElementById("publicDemoKpis");
+    var c1Canvas = document.getElementById("publicDemoChart1");
+    var c2Canvas = document.getElementById("publicDemoChart2");
+    var c1Title = document.getElementById("publicDemoChart1Title");
+    var c2Title = document.getElementById("publicDemoChart2Title");
+    var studioLink = document.getElementById("publicDemoStudioLink");
+    var pillRows = document.getElementById("demoPillRows");
+    var pillHealed = document.getElementById("demoPillHealed");
+    var pillAnom = document.getElementById("demoPillAnom");
+    var pillFx = document.getElementById("demoPillFx");
+
+    var activeDemoDomain = "sales";
+    var demoChart1 = null;
+    var demoChart2 = null;
+
+    function tFmt(key, fallback, vars) {
+      if (window.autobiI18n && typeof window.autobiI18n.t === "function") {
+        var val = window.autobiI18n.t(key, vars);
+        if (val && val !== key) return val;
+      }
+      var out = fallback || key;
+      if (vars) {
+        Object.keys(vars).forEach(function (k) {
+          out = out.replace("{" + k + "}", String(vars[k]));
+        });
+      }
+      return out;
+    }
+
+    function renderMiniChart(prevInst, canvas, titleEl, cfg, fallbackType) {
+      if (prevInst) {
+        try { prevInst.destroy(); } catch (_) {}
+      }
+      if (!canvas || !cfg || typeof Chart === "undefined") return null;
+      if (titleEl) titleEl.textContent = cfg.title || "";
+      var cType = cfg.type || fallbackType || "bar";
+      var isDoughnut = cType === "doughnut";
+      var isLine = cType === "line";
+      var light = isLightMode();
+      var gridColor = light ? "rgba(15, 23, 42, 0.08)" : "rgba(255, 255, 255, 0.06)";
+      var tickColor = light ? "#475569" : "#94a3b8";
+      var borderCol = light ? "#ffffff" : "#0f172a";
+      var palette = ["#6366f1", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6"];
+
+      return new Chart(canvas.getContext("2d"), {
+        type: cType,
+        data: {
+          labels: Object.keys(cfg.data || {}),
+          datasets: [{
+            label: cfg.series_label || cfg.title || "Value",
+            data: Object.values(cfg.data || {}),
+            backgroundColor: isDoughnut ? palette : (isLine ? "rgba(99, 102, 241, 0.22)" : (fallbackType === "doughnut" ? palette : "rgba(99, 102, 241, 0.85)")),
+            borderColor: isDoughnut ? borderCol : "#6366f1",
+            borderWidth: isLine ? 2.4 : (isDoughnut ? 2 : 1),
+            tension: isLine ? 0.35 : 0,
+            fill: isLine,
+            borderRadius: (isDoughnut || isLine) ? 0 : 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: isDoughnut,
+              position: "bottom",
+              labels: { color: tickColor, boxWidth: 10, padding: 10, font: { size: 11 } }
+            }
+          },
+          cutout: isDoughnut ? "62%" : 0,
+          scales: isDoughnut ? {} : {
+            x: { grid: { display: false }, ticks: { color: tickColor, font: { size: 10.5 } } },
+            y: { beginAtZero: !isLine, grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 10.5 } } }
+          }
+        }
+      });
+    }
+
+    function applyDemoData(data) {
+      if (!data || !data.success) return;
+      var summary = data.audit_summary || {};
+      if (pillRows) {
+        pillRows.textContent = tFmt("land_demo_rows_pill", "{clean} clean rows ({dropped} summary pruned)", {
+          clean: summary.cleaned_rows || 0,
+          dropped: summary.dropped_rows || 0
+        });
+      }
+      if (pillHealed) {
+        pillHealed.textContent = summary.unpivoted ? "1C Crosstab Unpivoted" : tFmt("land_demo_healed_pill", "Deterministic Schema Normalized");
+      }
+      if (pillAnom) {
+        pillAnom.textContent = tFmt("land_demo_anom_pill", "{n} CFO risk flag(s)", { n: summary.flags_count || 0 });
+      }
+      if (pillFx) {
+        pillFx.textContent = summary.fx_active
+          ? tFmt("land_demo_fx_pill_on", "CBU.uz Dual UZS/USD Active")
+          : tFmt("land_demo_fx_pill_off", "Single Currency Ready");
+      }
+
+      if (kpiWrap) {
+        kpiWrap.innerHTML = "";
+        (data.kpis || []).forEach(function (k) {
+          var card = document.createElement("div");
+          card.className = "demo-kpi-card" + (k.theme ? " theme-" + k.theme : "");
+          card.innerHTML =
+            "<span class=\"demo-kpi-lbl\"></span>" +
+            "<strong class=\"demo-kpi-val\"></strong>" +
+            "<em class=\"demo-kpi-sub\"></em>";
+          card.querySelector(".demo-kpi-lbl").textContent = k.label || "";
+          card.querySelector(".demo-kpi-val").textContent = k.value || "";
+          card.querySelector(".demo-kpi-sub").textContent = k.sub || "";
+          kpiWrap.appendChild(card);
+        });
+      }
+
+      var charts = data.charts || {};
+      demoChart1 = renderMiniChart(demoChart1, c1Canvas, c1Title, charts.chart1, "bar");
+      demoChart2 = renderMiniChart(demoChart2, c2Canvas, c2Title, charts.chart2, "doughnut");
+    }
+
+    function loadPublicDemo(domain) {
+      activeDemoDomain = domain || "sales";
+      for (var i = 0; i < demoTabs.length; i++) {
+        var btn = demoTabs[i];
+        var isActive = btn.getAttribute("data-demo-domain") === activeDemoDomain;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      }
+      if (studioLink) {
+        studioLink.setAttribute("href", "/studio?demo=" + encodeURIComponent(activeDemoDomain));
+      }
+      fetch("/api/public-demo/" + encodeURIComponent(activeDemoDomain))
+        .then(function (r) { return r.json(); })
+        .then(applyDemoData)
+        .catch(function () {});
+    }
+
+    if (demoTabs.length && kpiWrap) {
+      for (var t = 0; t < demoTabs.length; t++) {
+        demoTabs[t].addEventListener("click", function () {
+          loadPublicDemo(this.getAttribute("data-demo-domain"));
+        });
+      }
+      loadPublicDemo("sales");
+    }
+
+    // Pricing billing & currency toggle
+    var billingMode = "monthly";
+    var currencyMode = "USD";
+    var billingBtns = document.querySelectorAll(".price-mode-btn[data-billing]");
+    var currencyBtns = document.querySelectorAll(".price-curr-btn[data-currency]");
+    var priceEls = document.querySelectorAll(".pricing-amount[data-usd-monthly]");
+    var periodEls = document.querySelectorAll(".pricing-card .pricing-period");
+    var UZS_RATE = 12850;
+
+    function refreshPricing() {
+      for (var i = 0; i < billingBtns.length; i++) {
+        billingBtns[i].classList.toggle("active", billingBtns[i].getAttribute("data-billing") === billingMode);
+      }
+      for (var j = 0; j < currencyBtns.length; j++) {
+        currencyBtns[j].classList.toggle("active", currencyBtns[j].getAttribute("data-currency") === currencyMode);
+      }
+      for (var k = 0; k < priceEls.length; k++) {
+        var el = priceEls[k];
+        var usd = parseFloat(el.getAttribute(billingMode === "annual" ? "data-usd-annual" : "data-usd-monthly") || "0");
+        if (currencyMode === "UZS") {
+          var uzs = Math.round((usd * UZS_RATE) / 1000) * 1000;
+          el.textContent = uzs === 0 ? "0 so‘m" : uzs.toLocaleString("en-US").replace(/,/g, " ") + " so‘m";
+        } else {
+          el.textContent = "$" + usd;
+        }
+      }
+      for (var p = 0; p < periodEls.length; p++) {
+        if (p === 0) continue; // starter remains forever free
+        periodEls[p].textContent = billingMode === "annual"
+          ? tFmt("price_per_mo_yr", "/ month (billed annually)")
+          : tFmt("price_per_mo", "/ month");
+      }
+    }
+
+    for (var b = 0; b < billingBtns.length; b++) {
+      billingBtns[b].addEventListener("click", function () {
+        billingMode = this.getAttribute("data-billing") || "monthly";
+        refreshPricing();
+      });
+    }
+    for (var c = 0; c < currencyBtns.length; c++) {
+      currencyBtns[c].addEventListener("click", function () {
+        currencyMode = this.getAttribute("data-currency") || "USD";
+        refreshPricing();
+      });
+    }
+
+    if (window.autobiI18n && typeof window.autobiI18n.onChange === "function") {
+      window.autobiI18n.onChange(function () {
+        refreshPricing();
+        if (demoTabs.length) loadPublicDemo(activeDemoDomain);
+      });
+    }
+
+    // Repaint demo charts if theme switches
+    var themeBtn = document.getElementById("themeToggleBtn");
+    if (themeBtn) {
+      themeBtn.addEventListener("click", function () {
+        setTimeout(function () {
+          if (demoTabs.length) loadPublicDemo(activeDemoDomain);
+        }, 40);
+      });
+    }
+  }
+
   function boot() {
     initHeroStoryMotion();
     initSchema3D();
     initDomainShowcase();
+    initPublicDemoAndPricing();
   }
 
   if (document.readyState === "loading") {
