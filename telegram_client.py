@@ -5,12 +5,16 @@ attachments directly to Telegram channels, groups, or director chats via Telegra
 """
 
 import os
+import io
 import re
 import json
+import hmac
+import hashlib
 import sqlite3
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from typing import Dict, Any, Optional, Tuple, List, Union
 
 
@@ -223,16 +227,22 @@ def poll_and_sync_updates(bot_token: Optional[str] = None, db_path: Optional[str
         upsert_subscriber(sub, db_path=db_path)
         new_subs.append(sub)
 
-        # Welcome greeting confirming connection
+        # Welcome greeting confirming connection + Mini App launcher
         if text.startswith("/start"):
             try:
+                webapp_url = get_webapp_base_url()
                 greeting = (
-                    "👋 <b>AutoBI Studio ga xush kelibsiz!</b>\n\n"
+                    "👋 <b>AutoBI Studio &amp; Mini App ga xush kelibsiz!</b>\n\n"
                     "Telegram hisobingiz AutoBI Studio ga muvaffaqiyatli ulandi.\n"
-                    "Veb-portaldan yuborilgan boshqaruv xulosalari va interaktiv HTML dashboardlar "
-                    "ushbu chatga yetkaziladi."
+                    "• Quyidagi tugma orqali to‘g‘ridan-to‘g‘ri Telegram ichida <b>AutoBI Mini App</b>’ni oching\n"
+                    "• Yoki istalgan <code>.xlsx</code> / <code>.csv</code> faylni shu chatga tashlang — tezkor KPI va Power BI to‘plamini olasiz!"
                 )
-                send_telegram_message(greeting, str(cid), token)
+                markup = {
+                    "inline_keyboard": [[
+                        {"text": "🚀 Open AutoBI Mini App", "web_app": {"url": webapp_url}}
+                    ]]
+                }
+                send_telegram_message(greeting, str(cid), token, reply_markup=markup if ctype == "private" else None)
             except Exception:
                 pass
 
@@ -345,6 +355,152 @@ def get_bot_username() -> str:
     return username or "@auto_bibot"
 
 
+def get_webapp_base_url() -> str:
+    """Resolve the public HTTPS base URL for the Telegram Mini App (/tg-app)."""
+    explicit = os.environ.get("TELEGRAM_WEBAPP_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    app_url = os.environ.get("APP_PUBLIC_URL", "https://autobi.uz").strip().rstrip("/")
+    return f"{app_url}/tg-app"
+
+
+def verify_telegram_webapp_init_data(
+    init_data: str,
+    bot_token: Optional[str] = None,
+    max_age_seconds: int = 86400,
+) -> Dict[str, Any]:
+    """Cryptographically verify signed Telegram.WebApp.initData per Telegram Mini App spec."""
+    if not init_data or not isinstance(init_data, str):
+        raise ValueError("Missing Telegram WebApp initData.")
+    token = bot_token or get_default_telegram_config()[0]
+    if not token:
+        raise ValueError("Telegram Bot Token is not configured on server.")
+
+    pairs = urllib.parse.parse_qsl(init_data, keep_blank_values=True)
+    params: Dict[str, str] = {}
+    received_hash = ""
+    for k, v in pairs:
+        if k == "hash":
+            received_hash = v.strip()
+        else:
+            params[k] = v
+
+    if not received_hash:
+        raise ValueError("Missing hash in Telegram WebApp initData.")
+
+    data_check_string = "\n".join(f"{k}={params[k]}" for k in sorted(params.keys()))
+    secret_key = hmac.new(b"WebAppData", token.encode("utf-8"), hashlib.sha256).digest()
+    calc_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(calc_hash, received_hash):
+        raise ValueError("Invalid Telegram WebApp signature.")
+
+    auth_date_raw = params.get("auth_date", "0")
+    try:
+        auth_date = int(auth_date_raw)
+    except ValueError as ve:
+        raise ValueError("Invalid auth_date in Telegram initData.") from ve
+
+    if max_age_seconds > 0 and (time.time() - auth_date) > max_age_seconds:
+        raise ValueError("Expired Telegram WebApp session. Please reopen the Mini App from Telegram.")
+
+    user_info: Dict[str, Any] = {}
+    if params.get("user"):
+        try:
+            user_info = json.loads(params["user"])
+        except Exception as exc:
+            raise ValueError("Invalid user JSON in Telegram initData.") from exc
+
+    if not user_info.get("id"):
+        raise ValueError("Missing Telegram user ID in initData.")
+
+    return {
+        "id": int(user_info["id"]),
+        "username": user_info.get("username") or "",
+        "first_name": user_info.get("first_name") or "",
+        "last_name": user_info.get("last_name") or "",
+        "language_code": (user_info.get("language_code") or "en").lower(),
+        "auth_date": auth_date,
+    }
+
+
+def download_telegram_file(file_id: str, bot_token: str, max_bytes: int = 20 * 1024 * 1024) -> Tuple[io.BytesIO, str]:
+    """Fetch a document uploaded by a user in Telegram chat using getFile + /file/bot endpoint."""
+    if not validate_bot_token(bot_token):
+        raise ValueError("Invalid Telegram Bot Token format.")
+    meta_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={urllib.parse.quote(file_id)}"
+    req = urllib.request.Request(meta_url, headers={"User-Agent": "AutoBI-Enterprise-Agent"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        meta = json.loads(resp.read().decode("utf-8"))
+    if not meta.get("ok") or not meta.get("result", {}).get("file_path"):
+        raise ValueError("Unable to retrieve file path from Telegram.")
+
+    file_info = meta["result"]
+    if int(file_info.get("file_size") or 0) > max_bytes:
+        raise ValueError("Telegram file exceeds the 20MB limit.")
+
+    file_path = file_info["file_path"]
+    dl_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+    dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "AutoBI-Enterprise-Agent"})
+    with urllib.request.urlopen(dl_req, timeout=30) as fresp:
+        raw = fresp.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError("Downloaded Telegram file exceeds the 20MB limit.")
+    return io.BytesIO(raw), os.path.basename(file_path)
+
+
+def configure_telegram_bot_webapp(
+    webhook_url: Optional[str] = None,
+    webapp_url: Optional[str] = None,
+    secret_token: Optional[str] = None,
+    bot_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Configure Telegram webhook + Menu WebApp button + bot slash commands via Bot API."""
+    token = bot_token or get_default_telegram_config()[0]
+    if not validate_bot_token(token):
+        raise ValueError("Valid TELEGRAM_BOT_TOKEN is required.")
+
+    results: Dict[str, Any] = {}
+
+    def _post_tg(method: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        u = f"https://api.telegram.org/bot{token}/{method}"
+        r = urllib.request.Request(
+            u,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "AutoBI-Enterprise-Agent"},
+        )
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    if webhook_url:
+        wh_body: Dict[str, Any] = {
+            "url": webhook_url,
+            "allowed_updates": ["message", "channel_post", "callback_query"],
+        }
+        if secret_token:
+            wh_body["secret_token"] = secret_token
+        results["webhook"] = _post_tg("setWebhook", wh_body)
+
+    if webapp_url:
+        results["menu_button"] = _post_tg("setChatMenuButton", {
+            "menu_button": {
+                "type": "web_app",
+                "text": "AutoBI Studio",
+                "web_app": {"url": webapp_url},
+            }
+        })
+
+    results["commands"] = _post_tg("setMyCommands", {
+        "commands": [
+            {"command": "start", "description": "Connect & launch AutoBI Mini App"},
+            {"command": "demo", "description": "Run instant sample BI analysis"},
+            {"command": "reports", "description": "Open your encrypted saved reports"},
+            {"command": "help", "description": "How to send Excel/CSV files for instant BI"},
+        ]
+    })
+    return results
+
+
 def escape_html(text: Any) -> str:
     """Escapes HTML special characters for safe Telegram HTML parse mode."""
     s = str(text or "")
@@ -380,9 +536,15 @@ def build_executive_digest_message(session_data: Dict[str, Any]) -> str:
         for k in kpis[:5]:
             lbl = escape_html(k.get("label", ""))
             val = escape_html(k.get("value", ""))
+            delta = escape_html(k.get("delta_text", ""))
+            delta_dir = k.get("delta_dir", "")
+            delta_str = ""
+            if delta:
+                arrow = "▲ " if delta_dir == "up" else ("▼ " if delta_dir == "down" else "")
+                delta_str = f" [{arrow}{delta}]"
             sub = escape_html(k.get("sub", ""))
             sub_text = f" <i>({sub})</i>" if sub else ""
-            lines.append(f"• <b>{lbl}:</b> {val}{sub_text}")
+            lines.append(f"• <b>{lbl}:</b> {val}{delta_str}{sub_text}")
         lines.append("")
 
     # 2. CFO Red-Flags & Audit Status
@@ -424,18 +586,21 @@ def send_telegram_message(
     text: str,
     chat_id: str,
     bot_token: str,
-    timeout: int = 10
+    timeout: int = 10,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Sends an HTML formatted message via Telegram Bot API."""
     if not validate_bot_token(bot_token):
         raise ValueError("Invalid Telegram Bot Token format.")
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
+    payload: Dict[str, Any] = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -463,7 +628,8 @@ def send_telegram_document(
     caption: str,
     chat_id: str,
     bot_token: str,
-    timeout: int = 20
+    timeout: int = 20,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Uploads a standalone document (interactive HTML report) via multipart form-data."""
     if not validate_bot_token(bot_token):
@@ -481,6 +647,12 @@ def send_telegram_document(
     # caption field
     body.extend(f"--{boundary}\r\n".encode("utf-8"))
     body.extend(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}\r\n'.encode("utf-8"))
+
+    if reply_markup:
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(
+            f'Content-Disposition: form-data; name="reply_markup"\r\n\r\n{json.dumps(reply_markup)}\r\n'.encode("utf-8")
+        )
 
     # document file field
     clean_filename = re.sub(r'[^\w\.\-]', '_', filename)
@@ -519,7 +691,9 @@ def dispatch_executive_report(
     session_data: Dict[str, Any],
     chat_id: Optional[Union[str, List[str]]] = None,
     bot_token: Optional[str] = None,
-    targets: Optional[List[str]] = None
+    targets: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    webapp_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     High-level orchestrator: sends both executive summary message and attached HTML dashboard
@@ -565,8 +739,21 @@ def dispatch_executive_report(
             continue
 
         try:
+            # Attach interactive Mini App button for private numeric chats (Telegram restricts web_app buttons in channels/groups)
+            sid = session_id or session_data.get("session_id")
+            msg_markup = None
+            if sid:
+                is_private_uid = bool(re.match(r"^\d+$", str(dest)))
+                base_tg = (webapp_url or get_webapp_base_url()).rstrip("/")
+                if is_private_uid:
+                    msg_markup = {
+                        "inline_keyboard": [[
+                            {"text": "📊 Open Interactive Mini App", "web_app": {"url": f"{base_tg}?session={urllib.parse.quote(str(sid))}"}}
+                        ]]
+                    }
+
             # 1. Send text digest
-            msg_res = send_telegram_message(message_text, dest, final_token)
+            msg_res = send_telegram_message(message_text, dest, final_token, reply_markup=msg_markup)
             msg_id = msg_res.get("result", {}).get("message_id")
 
             # 2. Send attached document

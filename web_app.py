@@ -140,7 +140,18 @@ def get_current_user():
         if verified_email:
             return verified_email
 
-    # 2. Check X-Workspace-Key header with constant-time comparison (for tests/APIs)
+    # 2. Check signed bearer / X-AutoBI-Token (for Telegram Mini App WebViews)
+    token_hdr = request.headers.get("X-AutoBI-Token", "").strip()
+    if not token_hdr:
+        auth_hdr = request.headers.get("Authorization", "").strip()
+        if auth_hdr.lower().startswith("bearer "):
+            token_hdr = auth_hdr[7:].strip()
+    if token_hdr:
+        verified_email = verify_auth_token(token_hdr)
+        if verified_email:
+            return verified_email
+
+    # 3. Check X-Workspace-Key header with constant-time comparison (for tests/APIs)
     key_header = request.headers.get("X-Workspace-Key")
     if key_header and hmac.compare_digest(key_header, WORKSPACE_PASSCODE):
         return "api-client@autobi.local"
@@ -1102,7 +1113,16 @@ def studio():
     """Render the interactive AutoBI Studio workspace."""
     lang = resolve_lang(request)
     theme = resolve_theme(request)
-    res = make_response(render_template("index.html", lang=lang, theme=theme))
+    res = make_response(render_template("index.html", lang=lang, theme=theme, is_tg_webapp=False))
+    return _apply_ui_pref_cookies(res)
+
+
+@app.route("/tg-app")
+def telegram_webapp():
+    """Render the AutoBI workspace inside Telegram Mini App (WebApp) shell."""
+    lang = resolve_lang(request)
+    theme = resolve_theme(request)
+    res = make_response(render_template("index.html", lang=lang, theme=theme, is_tg_webapp=True))
     return _apply_ui_pref_cookies(res)
 
 
@@ -1141,17 +1161,67 @@ def apple_touch_icon():
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _attach_auth_cookie(res, email: str):
+def _attach_auth_cookie(res, email: str, allow_cross_site: bool = False):
     signed_token = sign_auth_token(email)
+    is_https = _is_https_request()
+    samesite_mode = "None" if (allow_cross_site and is_https) else "Lax"
     res.set_cookie(
         "autobi_user",
         signed_token,
         max_age=30 * 86400,
         httponly=True,
-        samesite="Lax",
-        secure=_is_https_request(),
+        samesite=samesite_mode,
+        secure=is_https,
     )
     return res
+
+
+@app.route("/api/auth/telegram-webapp", methods=["POST"])
+def auth_telegram_webapp():
+    """Authenticate a Telegram Mini App user via HMAC-SHA256 signed Telegram.WebApp.initData."""
+    from telegram_client import verify_telegram_webapp_init_data, upsert_subscriber
+
+    data = request.get_json(silent=True) or {}
+    init_data = (data.get("init_data") or "").strip()
+    bot_token_override = data.get("bot_token")
+    try:
+        tg_user = verify_telegram_webapp_init_data(init_data, bot_token=bot_token_override)
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve)}), 401
+
+    tg_id = tg_user["id"]
+    tg_email = f"tg_{tg_id}@telegram.autobi.uz"
+    display_name = (
+        f"{tg_user.get('first_name', '')} {tg_user.get('last_name', '')}".strip()
+        or tg_user.get("username")
+        or f"Telegram {tg_id}"
+    )
+
+    try:
+        upsert_subscriber({
+            "chat_id": tg_id,
+            "username": tg_user.get("username", ""),
+            "first_name": tg_user.get("first_name", ""),
+            "chat_type": "private",
+        })
+        users_vault.ensure_bootstrap_user(
+            tg_email,
+            hashlib.sha256(f"{SECRET_KEY}:tg:{tg_id}".encode("utf-8")).hexdigest(),
+            full_name=display_name,
+            role="user",
+        )
+    except Exception:
+        pass
+
+    signed_token = sign_auth_token(tg_email)
+    res = jsonify(sanitize_for_json({
+        "success": True,
+        "user": tg_email,
+        "full_name": display_name,
+        "token": signed_token,
+        "tg_user": tg_user,
+    }))
+    return _attach_auth_cookie(res, tg_email, allow_cross_site=True)
 
 
 @app.route("/api/auth/status")
@@ -1481,6 +1551,55 @@ def public_demo_preview(domain: str):
         return jsonify({k: v for k, v in light_payload.items() if k != "_ts"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/session/<session_id>", methods=["GET"])
+@require_auth
+def get_session_payload(session_id: str):
+    """Hydrate an active session into Studio / Telegram Mini App UI."""
+    sess = sessions.get(session_id)
+    if not sess:
+        return jsonify({"success": False, "error": "Session expired or not found."}), 404
+    snap = _build_session_snapshot_dict(sess)
+    # Keep exact session_id instead of generating another ephemeral ID
+    domain_key = snap.get("domain_key", "generic")
+    domain_info = snap.get("domain_info") or {}
+    audit_log = snap.get("audit_log") or {}
+    return jsonify(sanitize_for_json({
+        "success": True,
+        "session_id": session_id,
+        "filename": snap.get("filename", "dataset.xlsx"),
+        "is_live_url": bool(snap.get("is_live_url")),
+        "source_url": snap.get("source_url"),
+        "domain": {
+            "key": domain_key,
+            "label": domain_info.get("label", domain_key),
+            "icon": domain_info.get("icon", "📊"),
+            "table_name": domain_info.get("table_name", "DataTable"),
+            "confidence": domain_info.get("confidence", 90.0),
+            "matched_signals": domain_info.get("matched_signals", []),
+            "all_domains": [
+                {"key": k, "label": v["label"], "icon": v["icon"]}
+                for k, v in DOMAINS.items()
+            ] + [{"key": "generic", "label": GENERIC_DOMAIN_INFO["label"], "icon": GENERIC_DOMAIN_INFO["icon"]}],
+        },
+        "kpis": snap.get("kpis", []),
+        "charts": snap.get("charts", {}),
+        "chart_overrides": snap.get("chart_overrides", {}),
+        "interactive_schema": snap.get("interactive_schema", {}),
+        "audit_log": audit_log,
+        "anomalies": audit_log.get("anomalies", []),
+        "anomaly_summary": audit_log.get("anomaly_summary", {"total_flags": 0, "critical_count": 0, "warning_count": 0, "info_count": 0, "has_critical": False}),
+        "unpivoted_matrix": audit_log.get("unpivoted_matrix", {"is_unpivoted": False}),
+        "fx_normalization": audit_log.get("fx_normalization", {"is_multi_currency": False}),
+        "pareto_segmentation": audit_log.get("pareto_segmentation", {"is_segmented": False}),
+        "regional_preset": audit_log.get("regional_preset"),
+        "dax_measures": snap.get("dax_measures", []),
+        "power_query_m": snap.get("power_query_m") or snap.get("m_script", ""),
+        "table_columns": snap.get("table_columns", []),
+        "display_labels": snap.get("display_labels") or audit_log.get("display_labels") or {},
+        "table_records": snap.get("table_records", []),
+    }))
 
 
 @app.route("/api/session/<session_id>/query", methods=["POST"])
@@ -2028,12 +2147,203 @@ def telegram_dispatch():
 
     try:
         from telegram_client import dispatch_executive_report
-        result = dispatch_executive_report(session_data, chat_id=chat_id, targets=targets, bot_token=bot_token)
+        result = dispatch_executive_report(
+            session_data,
+            chat_id=chat_id,
+            targets=targets,
+            bot_token=bot_token,
+            session_id=session_id,
+        )
         return jsonify(result)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Telegram dispatch failed: {str(e)}"}), 502
+
+
+def _tg_webhook_secret() -> str:
+    return hmac.new(SECRET_KEY.encode("utf-8"), b"autobi-tg-webhook-secret", hashlib.sha256).hexdigest()[:32]
+
+
+@app.route("/api/telegram/setup-webhook", methods=["POST"])
+@require_auth
+def setup_telegram_webhook():
+    """Register bot webhook, slash commands, and native Menu WebApp launcher."""
+    from telegram_client import configure_telegram_bot_webapp, get_webapp_base_url
+    data = request.get_json(silent=True) or {}
+    webapp_url = (data.get("webapp_url") or get_webapp_base_url()).strip()
+    base_root = webapp_url.rsplit("/tg-app", 1)[0].rstrip("/")
+    webhook_url = (data.get("webhook_url") or f"{base_root}/api/telegram/webhook").strip()
+    try:
+        res = configure_telegram_bot_webapp(
+            webhook_url=webhook_url,
+            webapp_url=webapp_url,
+            secret_token=_tg_webhook_secret(),
+            bot_token=data.get("bot_token"),
+        )
+        return jsonify({"success": True, "webhook_url": webhook_url, "webapp_url": webapp_url, "telegram": res})
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to configure Telegram bot: {str(e)}"}), 502
+
+
+@app.route("/api/telegram/webhook", methods=["POST"])
+def telegram_webhook():
+    """Interactive Telegram Bot Webhook handling /start, /demo, /reports, /help and chat file uploads."""
+    from telegram_client import (
+        get_default_telegram_config,
+        get_webapp_base_url,
+        upsert_subscriber,
+        send_telegram_message,
+        dispatch_executive_report,
+        download_telegram_file,
+    )
+
+    secret_hdr = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "").strip()
+    strict_mode = os.environ.get("TELEGRAM_WEBHOOK_STRICT", "").lower() in ("1", "true", "yes")
+    if (secret_hdr or strict_mode) and not hmac.compare_digest(secret_hdr, _tg_webhook_secret()):
+        return jsonify({"ok": False, "error": "Invalid webhook secret token."}), 403
+
+    update = request.get_json(silent=True) or {}
+    msg = update.get("message") or update.get("channel_post")
+    if not isinstance(msg, dict):
+        return jsonify({"ok": True, "ignored": True})
+
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id")
+    if not chat_id:
+        return jsonify({"ok": True, "ignored": True})
+
+    ctype = chat.get("type", "private")
+    uname = chat.get("username") or ""
+    fname = chat.get("first_name") or chat.get("title") or ""
+    text = (msg.get("text") or msg.get("caption") or "").strip()
+
+    token = get_default_telegram_config()[0]
+    param = None
+    if text.startswith("/start"):
+        parts = text.split(maxsplit=1)
+        if len(parts) > 1:
+            param = parts[1].strip()
+
+    upsert_subscriber({
+        "chat_id": chat_id,
+        "username": uname,
+        "first_name": fname,
+        "chat_type": ctype,
+        "last_start_param": param,
+    })
+
+    if not token:
+        return jsonify({"ok": True, "handled": "stored_no_token"})
+
+    webapp_base = get_webapp_base_url()
+
+    # 1. Spreadsheet file directly dropped into Telegram chat -> instant BI + Mini App button!
+    doc = msg.get("document")
+    if isinstance(doc, dict) and doc.get("file_id"):
+        doc_name = (doc.get("file_name") or "telegram_sheet.xlsx").strip()
+        ext = os.path.splitext(doc_name)[1].lower()
+        if ext not in (".xlsx", ".xls", ".csv"):
+            if ctype == "private":
+                send_telegram_message(
+                    "⚠️ Please send an <b>.xlsx</b>, <b>.xls</b>, or <b>.csv</b> spreadsheet for automated BI analysis.",
+                    str(chat_id),
+                    token,
+                )
+            return jsonify({"ok": True, "handled": "unsupported_doc"})
+        try:
+            buf, _ = download_telegram_file(doc["file_id"], token)
+            cleaner = SelfHealingCleaner(buf, filename=doc_name)
+            df_clean = cleaner.clean()
+            payload = build_analysis_payload(cleaner, df_clean, doc_name)
+            sess_data = sessions.get(payload["session_id"]) or {}
+            dispatch_executive_report(
+                sess_data,
+                targets=[str(chat_id)],
+                bot_token=token,
+                session_id=payload["session_id"],
+                webapp_url=webapp_base,
+            )
+            return jsonify({"ok": True, "handled": "document", "session_id": payload["session_id"]})
+        except Exception as exc:
+            if ctype == "private":
+                send_telegram_message(f"⚠️ Could not process <code>{doc_name}</code>: {exc}", str(chat_id), token)
+            return jsonify({"ok": True, "handled": "document_error"})
+
+    # 2. Bot slash commands
+    cmd = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
+    if cmd == "/start":
+        greeting = (
+            "👋 <b>Welcome to AutoBI Studio &amp; Mini App!</b>\n\n"
+            "• Tap <b>Open AutoBI Mini App</b> below to browse dashboards, interactive slicers &amp; saved reports inside Telegram.\n"
+            "• Or drop any <code>.xlsx</code> / <code>.csv</code> spreadsheet directly in this chat for instant KPIs, CFO anomaly checks &amp; Power BI export."
+        )
+        markup = {"inline_keyboard": [[{"text": "🚀 Open AutoBI Mini App", "web_app": {"url": webapp_base}}]]} if ctype == "private" else None
+        send_telegram_message(greeting, str(chat_id), token, reply_markup=markup)
+        return jsonify({"ok": True, "handled": "start"})
+
+    if cmd == "/demo":
+        arg = text.split()[1].strip().lower() if len(text.split()) > 1 else "sales"
+        if arg not in ("sales", "marketing", "hr", "inventory", "finance", "generic", "crm", "uzum"):
+            arg = "sales"
+        try:
+            df_raw = generate_synthetic_demo_df(arg)
+            cleaner = SelfHealingCleaner(df_raw, filename=f"demo_{arg}_dataset.xlsx")
+            df_clean = cleaner.clean()
+            override = None if arg in ("crm", "uzum") else arg
+            payload = build_analysis_payload(cleaner, df_clean, f"demo_{arg}_dataset.xlsx", domain_override=override)
+            sess_data = sessions.get(payload["session_id"]) or {}
+            dispatch_executive_report(
+                sess_data,
+                targets=[str(chat_id)],
+                bot_token=token,
+                session_id=payload["session_id"],
+                webapp_url=webapp_base,
+            )
+            return jsonify({"ok": True, "handled": "demo", "session_id": payload["session_id"]})
+        except Exception as exc:
+            send_telegram_message(f"⚠️ Demo error: {exc}", str(chat_id), token)
+            return jsonify({"ok": True, "handled": "demo_error"})
+
+    if cmd == "/reports" and ctype == "private":
+        tg_email = f"tg_{chat_id}@telegram.autobi.uz"
+        reps = reports_store.list_reports(tg_email)
+        if not reps:
+            markup = {"inline_keyboard": [[{"text": "🚀 Open AutoBI Mini App", "web_app": {"url": webapp_base}}]]}
+            send_telegram_message(
+                "📁 You don't have any saved reports yet. Open the Mini App or send a spreadsheet here to analyze and save!",
+                str(chat_id),
+                token,
+                reply_markup=markup,
+            )
+        else:
+            kb = [[{
+                "text": f"📊 {r.get('title', 'Report')[:28]}",
+                "web_app": {"url": f"{webapp_base}?report={r['report_id']}"}
+            }] for r in reps[:5]]
+            send_telegram_message(
+                f"📁 <b>Your Saved Reports ({len(reps)}):</b>\nTap a report below to open interactive charts &amp; MoM deltas:",
+                str(chat_id),
+                token,
+                reply_markup={"inline_keyboard": kb},
+            )
+        return jsonify({"ok": True, "handled": "reports"})
+
+    if cmd == "/help" and ctype == "private":
+        help_msg = (
+            "🤖 <b>AutoBI Studio Bot Commands</b>\n\n"
+            "• <b>Send any Excel/CSV file</b> → instant KPIs, CFO audit &amp; Power BI dashboard\n"
+            "• <code>/start</code> — Open the AutoBI Telegram Mini App\n"
+            "• <code>/demo sales|finance|crm|uzum</code> — Run an instant sample analysis\n"
+            "• <code>/reports</code> — Open your encrypted Saved Reports"
+        )
+        markup = {"inline_keyboard": [[{"text": "🚀 Launch Mini App", "web_app": {"url": webapp_base}}]]}
+        send_telegram_message(help_msg, str(chat_id), token, reply_markup=markup)
+        return jsonify({"ok": True, "handled": "help"})
+
+    return jsonify({"ok": True, "handled": "noop"})
 
 
 @app.route("/api/purge/<session_id>", methods=["POST", "DELETE"])
@@ -2101,12 +2411,16 @@ pause
 def add_security_headers(response):
     """Add defensive security headers to all HTTP responses."""
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    is_tg_frame = request.path.startswith("/tg-app")
+    if not is_tg_frame:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    frame_rule = "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org; " if is_tg_frame else ""
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        f"{frame_rule}"
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://telegram.org; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
         "img-src 'self' data: https:; "

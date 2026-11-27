@@ -3206,3 +3206,19 @@ tr:hover td {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* --- Telegram Mini App (WebApp) Compact Shell --- */
+body.tg-webapp-mode .app-container {
+  padding-top: 10px;
+}
+
+body.tg-webapp-mode .app-header {
+  top: 4px;
+  padding: 10px 14px;
+}
+
+body.tg-webapp-mode .nav-anchor-link[data-i18n="nav_overview"],
+body.tg-webapp-mode .hero-section,
+body.tg-webapp-mode .site-footer {
+  display: none;
+}

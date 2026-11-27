@@ -93,6 +93,23 @@ document.addEventListener('DOMContentLoaded', () => {
     let isAuthenticated = false;
     let pendingAuthAction = null;
     let authMode = 'login'; // 'login' | 'register'
+    let tgAuthToken = null;
+
+    // Ensure Telegram Mini App WebViews send signed bearer token on same-origin API calls
+    const _rawFetch = window.fetch.bind(window);
+    window.fetch = (input, init = {}) => {
+        const urlStr = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+        if (tgAuthToken && urlStr.startsWith('/api/')) {
+            const nextInit = Object.assign({}, init);
+            const hdrs = new Headers(nextInit.headers || {});
+            if (!hdrs.has('X-AutoBI-Token')) {
+                hdrs.set('X-AutoBI-Token', tgAuthToken);
+            }
+            nextInit.headers = hdrs;
+            return _rawFetch(input, nextInit);
+        }
+        return _rawFetch(input, init);
+    };
     let activeFilters = {};
     let activeDateRange = { from: '', to: '' };
     let activeChartOverrides = {};
@@ -313,14 +330,90 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Call on load (and optionally launch ?demo=<domain> clicked from the 3D landing page)
-    checkAuthStatus().then(() => {
+    async function initTelegramMiniApp() {
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (!tg) return;
+        try {
+            tg.ready();
+            tg.expand();
+            if (document.body) document.body.classList.add('tg-webapp-mode');
+
+            if (tg.colorScheme && window.autobiTheme && typeof window.autobiTheme.setTheme === 'function') {
+                if (!localStorage.getItem('autobi_theme')) {
+                    window.autobiTheme.setTheme(tg.colorScheme === 'light' ? 'light' : 'dark');
+                }
+            }
+
+            const tgUserUnsafe = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+            if (tgUserUnsafe.language_code && i18n && !localStorage.getItem('autobi_lang')) {
+                const lc = String(tgUserUnsafe.language_code).toLowerCase();
+                if (lc.startsWith('ru')) i18n.setLang('ru');
+                else if (lc.startsWith('uz')) i18n.setLang('uz');
+            }
+
+            if (tg.BackButton) {
+                tg.BackButton.onClick(() => {
+                    if (resultsContainer && resultsContainer.style.display !== 'none') {
+                        resultsContainer.style.display = 'none';
+                        uploadCard.style.display = 'block';
+                        tg.BackButton.hide();
+                    }
+                });
+            }
+
+            if (tg.initData) {
+                const res = await _rawFetch('/api/auth/telegram-webapp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ init_data: tg.initData }),
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    tgAuthToken = json.token || null;
+                    isAuthenticated = true;
+                    if (openAuthBtn) openAuthBtn.style.display = 'none';
+                    if (userStatusBadge) {
+                        userStatusBadge.style.display = 'inline-flex';
+                        if (userEmailSpan) userEmailSpan.textContent = json.full_name || json.user || t('badge_authenticated');
+                    }
+                    if (logoutBtn) logoutBtn.style.display = 'none';
+                }
+            }
+        } catch (e) {
+            console.warn('Telegram Mini App init skipped:', e);
+        }
+    }
+
+    async function loadSessionById(sessionId) {
+        if (!sessionId) return;
+        showLoading(t('loading_title'));
+        try {
+            const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}`);
+            const json = await res.json();
+            if (json.success) {
+                renderResults(json);
+            }
+        } catch (_) {}
+        finally {
+            hideLoading();
+        }
+    }
+
+    // Call on load (Telegram Mini App init -> auth status -> optional ?session / ?report / ?demo launch)
+    initTelegramMiniApp().then(() => checkAuthStatus()).then(() => {
         if (isAuthenticated) {
             loadSavedReports();
         }
         const params = new URLSearchParams(window.location.search);
+        const sessionParam = (params.get('session') || '').trim();
+        const reportParam = (params.get('report') || '').trim();
         const demoDomain = (params.get('demo') || '').trim().toLowerCase();
-        if (['sales', 'marketing', 'hr', 'inventory', 'finance', 'generic'].includes(demoDomain)) {
+
+        if (sessionParam) {
+            requireWorkspaceAuth(() => loadSessionById(sessionParam));
+        } else if (reportParam) {
+            requireWorkspaceAuth(() => openSavedReport(reportParam));
+        } else if (['sales', 'marketing', 'hr', 'inventory', 'finance', 'generic', 'crm', 'uzum'].includes(demoDomain)) {
             if (window.history && window.history.replaceState) {
                 params.delete('demo');
                 const cleanSearch = params.toString();
@@ -1088,10 +1181,25 @@ document.addEventListener('DOMContentLoaded', () => {
             sheetPickerWrap.style.display = 'none';
         }
 
-        // Set download link
+        // Set download link (use header-authenticated Blob download inside Telegram Mini App WebViews)
         if (downloadZipBtn) {
-            downloadZipBtn.onclick = () => {
-                window.location.href = `/api/download/${currentSessionId}`;
+            downloadZipBtn.onclick = async () => {
+                if (tgAuthToken) {
+                    const res = await fetch(`/api/download/${currentSessionId}`);
+                    if (res.ok) {
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `AutoBI_${currentSessionId.slice(0, 8)}.zip`;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                    }
+                } else {
+                    window.location.href = `/api/download/${currentSessionId}`;
+                }
             };
         }
 
@@ -1154,11 +1262,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reveal Workspace
         uploadCard.style.display = 'none';
         resultsContainer.style.display = 'block';
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.BackButton) {
+            window.Telegram.WebApp.BackButton.show();
+        }
 
         // Re-upload Button in header
         document.getElementById('resetUploadBtn').onclick = () => {
             resultsContainer.style.display = 'none';
             uploadCard.style.display = 'block';
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.BackButton) {
+                window.Telegram.WebApp.BackButton.hide();
+            }
             fileInput.value = '';
             if (gsheetsUrlInput) gsheetsUrlInput.value = '';
             currentLastFile = null;

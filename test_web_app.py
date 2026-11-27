@@ -1314,6 +1314,102 @@ def test_regional_presets_and_sql_connector():
     print("[PASS] test_regional_presets_and_sql_connector (amoCRM/Bitrix24, Uzum, Payme/Click & Read-Only SQL security)")
 
 
+def test_telegram_webapp_and_interactive_bot():
+    """Verify Telegram Mini App (/tg-app, initData HMAC auth) and interactive webhook commands & chat uploads."""
+    import hashlib
+    import hmac as std_hmac
+    import json as std_json
+    import time
+    import urllib.parse
+    from unittest.mock import patch
+
+    client = app.test_client()
+    test_bot_token = "123456789:ABCDEF1234567890abcdef1234567890abc"
+
+    # 1. /tg-app Mini App shell renders telegram-web-app.js and Telegram frame-ancestors CSP
+    tg_res = client.get("/tg-app")
+    assert tg_res.status_code == 200
+    assert b"telegram-web-app.js" in tg_res.data
+    assert b"tg-webapp-mode" in tg_res.data
+    csp_hdr = tg_res.headers.get("Content-Security-Policy", "")
+    assert "https://telegram.org" in csp_hdr
+    assert "https://web.telegram.org" in csp_hdr
+
+    # 2. Cryptographically signed Telegram.WebApp.initData authentication
+    user_json = std_json.dumps({"id": 99887766, "first_name": "Shuhrat", "username": "shuhrat_tg", "language_code": "uz"})
+    auth_date = str(int(time.time()))
+    params = {"auth_date": auth_date, "query_id": "AAEAAAE", "user": user_json}
+    data_check = "\n".join(f"{k}={params[k]}" for k in sorted(params.keys()))
+    secret_key = std_hmac.new(b"WebAppData", test_bot_token.encode("utf-8"), hashlib.sha256).digest()
+    sig_hash = std_hmac.new(secret_key, data_check.encode("utf-8"), hashlib.sha256).hexdigest()
+    init_data = urllib.parse.urlencode({**params, "hash": sig_hash})
+
+    # Tampered initData is rejected with 401
+    assert client.post("/api/auth/telegram-webapp", json={"init_data": init_data + "tamper", "bot_token": test_bot_token}).status_code == 401
+
+    # Valid signed initData authenticates into encrypted tg_99887766@telegram.autobi.uz workspace
+    auth_res = client.post("/api/auth/telegram-webapp", json={"init_data": init_data, "bot_token": test_bot_token})
+    assert auth_res.status_code == 200
+    auth_json = auth_res.get_json()
+    assert auth_json["success"] is True
+    assert auth_json["user"] == "tg_99887766@telegram.autobi.uz"
+    signed_token = auth_json["token"]
+
+    # 3. Signed bearer token unlocks /api/session/<sid> without needing cookie
+    sample_res = client.post("/api/sample", json={"domain": "sales"}, headers={"X-AutoBI-Token": signed_token})
+    assert sample_res.status_code == 200
+    sid = sample_res.get_json()["session_id"]
+    sess_res = client.get(f"/api/session/{sid}", headers={"X-AutoBI-Token": signed_token})
+    assert sess_res.status_code == 200
+    assert sess_res.get_json()["session_id"] == sid
+
+    # 4. Interactive webhook rejects forged secret headers
+    forged_wh = client.post(
+        "/api/telegram/webhook",
+        json={"message": {"chat": {"id": 99887766, "type": "private"}, "text": "/start"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong_secret"},
+    )
+    assert forged_wh.status_code == 403
+
+    # 5. Webhook /start + /demo + direct chat CSV upload trigger Mini App inline buttons
+    from web_app import _tg_webhook_secret
+    wh_headers = {"X-Telegram-Bot-Api-Secret-Token": _tg_webhook_secret()}
+    csv_bytes = b"order_id,order_date,category,units_sold,unit_price,status\n1,2026-11-01,Tech,4,250,Completed\n2,2026-11-02,Tech,2,150,Completed\n"
+
+    with patch("telegram_client.get_default_telegram_config", return_value=(test_bot_token, "99887766")), \
+         patch("telegram_client.send_telegram_message", return_value={"ok": True, "result": {"message_id": 11}}) as mock_msg, \
+         patch("telegram_client.send_telegram_document", return_value={"ok": True, "result": {"message_id": 12}}) as mock_doc, \
+         patch("telegram_client.download_telegram_file", return_value=(io.BytesIO(csv_bytes), "tg_chat_sales.csv")):
+
+        start_wh = client.post(
+            "/api/telegram/webhook",
+            json={"message": {"chat": {"id": 99887766, "type": "private", "username": "shuhrat_tg"}, "text": "/start"}},
+            headers=wh_headers,
+        )
+        assert start_wh.status_code == 200
+        assert start_wh.get_json()["handled"] == "start"
+        markup_sent = mock_msg.call_args.kwargs.get("reply_markup") or {}
+        assert "web_app" in str(markup_sent)
+
+        doc_wh = client.post(
+            "/api/telegram/webhook",
+            json={"message": {
+                "chat": {"id": 99887766, "type": "private", "username": "shuhrat_tg"},
+                "document": {"file_id": "BQACAgIAAx0C_TEST", "file_name": "tg_chat_sales.csv"}
+            }},
+            headers=wh_headers,
+        )
+        assert doc_wh.status_code == 200
+        doc_json = doc_wh.get_json()
+        assert doc_json["handled"] == "document"
+        doc_sid = doc_json["session_id"]
+        assert mock_doc.called
+        last_markup = mock_msg.call_args.kwargs.get("reply_markup") or {}
+        assert f"?session={doc_sid}" in str(last_markup)
+
+    print("[PASS] test_telegram_webapp_and_interactive_bot (Telegram Mini App initData HMAC, /tg-app & interactive webhook)")
+
+
 if __name__ == "__main__":
     test_auth_flow()
     test_index_route()
@@ -1325,6 +1421,7 @@ if __name__ == "__main__":
     test_saved_reports_and_mom_refresh()
     test_scheduled_telegram_digests()
     test_regional_presets_and_sql_connector()
+    test_telegram_webapp_and_interactive_bot()
     test_api_sample()
     test_api_upload_csv()
     test_session_persistence()
